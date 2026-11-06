@@ -1,0 +1,670 @@
+{
+  "timestamp": "2026-10-04T11:37:58.419367",
+  "seed": 42,
+  "as_of_date": "2016-04-24",
+  "schema_summary": {
+    "pair_count": 75,
+    "materials_count": 25,
+    "areas": [
+      "California - CA_1",
+      "Texas - TX_1",
+      "Wisconsin - WI_1"
+    ]
+  },
+  "section_3_verification": {
+    "all_matched": true,
+    "checks": [
+      {
+        "fact": "75 (material, area) pairs = 25 materials x 3 areas",
+        "expected": "75 pairs, 25 materials, 3 areas",
+        "observed": "75 pairs, 25 materials, 3 areas",
+        "match": true
+      },
+      {
+        "fact": "Demand: 1,913 daily rows per pair, 2011-01-29 to 2016-04-24, no gaps, no missing, no negatives",
+        "expected": "1913 rows/pair, 2011-01-29 to 2016-04-24, no gaps, no neg",
+        "observed": "1913-1913 rows/pair, 2011-01-29 to 2016-04-24, gaps=False",
+        "match": true
+      },
+      {
+        "fact": "Demand is intermittent: about 26% zeros; 29 pairs > 30% zeros; 6 pairs > 50%; mean ~0.6-36 units/day",
+        "expected": "~26% zeros, 29 pairs > 30%, 6 pairs > 50%, mean 0.6-36",
+        "observed": "25.8% zeros, 29 pairs > 30%, 6 pairs > 50%, mean range [0.56, 36.34]",
+        "match": true
+      },
+      {
+        "fact": "is_promotion has ~32.9% share for every pair and weak avg lift (~1.06, range ~0.93-1.43)",
+        "expected": "~32.9% share, lift ~1.06 (range ~0.93-1.43)",
+        "observed": "32.9%-32.9% share, lift mean 1.062 (range [0.935, 1.429])",
+        "match": true
+      },
+      {
+        "fact": "Lead time: 274 orders per pair, 2011-01-29 to 2016-04-23, mean ~5.2 days, corr with quantity ~0.89",
+        "expected": "274 orders/pair, 2011-01-29 to 2016-04-23, mean ~5.2, corr ~0.89",
+        "observed": "274-274 orders/pair, 2011-01-29 to 2016-04-23, mean 5.23, within-pair corr 0.889",
+        "match": true
+      },
+      {
+        "fact": "Lead time higher in Nov-Dec (+1.3 days), area means: CA ~4.2, TX ~5.2, WI ~6.3 days",
+        "expected": "Nov-Dec delta +1.3 days, CA ~4.2, TX ~5.2, WI ~6.3",
+        "observed": "Nov-Dec delta +1.34 days, Area means: {'California - CA_1': 4.2, 'Texas - TX_1': 5.22, 'Wisconsin - WI_1': 6.25}",
+        "match": true
+      },
+      {
+        "fact": "Inventory snapshot stamped 2016-04-24, equals last demand date (as_of_date)",
+        "expected": "2016-04-24",
+        "observed": "['2016-04-24']",
+        "match": true
+      }
+    ]
+  },
+  "demand_summary": {
+    "total_rows": 143475,
+    "rows_per_pair": 1913,
+    "date_range": [
+      "2011-01-29",
+      "2016-04-24"
+    ],
+    "overall_zero_share": 0.2579,
+    "pairs_over_30_pct_zeros": 29,
+    "pairs_over_50_pct_zeros": 6,
+    "pair_mean_range": [
+      0.56,
+      36.34
+    ],
+    "promo_share_range": [
+      0.3293,
+      0.3293
+    ],
+    "promo_lift_mean": 1.062,
+    "promo_lift_range": [
+      0.935,
+      1.429
+    ],
+    "category_counts": {
+      "Smooth": 21,
+      "Intermittent": 17,
+      "Erratic": 15,
+      "Lumpy": 22
+    }
+  },
+  "lead_time_summary": {
+    "total_orders": 20550,
+    "orders_per_pair": 274,
+    "date_range": [
+      "2011-01-29",
+      "2016-04-23"
+    ],
+    "mean_lead_time": 5.23,
+    "mean_within_pair_corr_quantity": 0.889,
+    "overall_corr_quantity": 0.13,
+    "nov_dec_delta": 1.34,
+    "area_means": {
+      "California - CA_1": 4.2,
+      "Texas - TX_1": 5.22,
+      "Wisconsin - WI_1": 6.25
+    }
+  },
+  "inventory_summary": {
+    "last_updated": [
+      "2016-04-24"
+    ],
+    "all_match_as_of": true,
+    "stock_stats": {
+      "min": 1.0,
+      "q25": 19.0,
+      "median": 75.0,
+      "mean": 151.55,
+      "q75": 211.5,
+      "max": 633.0
+    },
+    "stock_cover_stats_days": {
+      "min_days": 0.1,
+      "q25_days": 4.0,
+      "median_days": 14.3,
+      "mean_days": 21.0,
+      "q75_days": 26.1,
+      "max_days": 119.4
+    },
+    "stock_cover_buckets": {
+      "critical_sub_7_days": 25,
+      "low_7_to_14_days": 12,
+      "medium_14_to_30_days": 21,
+      "well_stocked_30_plus_days": 17
+    },
+    "note": "stock_status_simulated was preserved for reference only and NEVER used in any calculations."
+  },
+  "intermittency_per_pair": [
+    {
+      "adi": 1.093,
+      "cv2": 0.239,
+      "category": "Smooth",
+      "material": "FOODS_2_019",
+      "area": "California - CA_1"
+    },
+    {
+      "adi": 1.247,
+      "cv2": 0.403,
+      "category": "Smooth",
+      "material": "FOODS_2_019",
+      "area": "Texas - TX_1"
+    },
+    {
+      "adi": 2.603,
+      "cv2": 0.303,
+      "category": "Intermittent",
+      "material": "FOODS_2_019",
+      "area": "Wisconsin - WI_1"
+    },
+    {
+      "adi": 1.091,
+      "cv2": 0.245,
+      "category": "Smooth",
+      "material": "FOODS_2_197",
+      "area": "California - CA_1"
+    },
+    {
+      "adi": 1.159,
+      "cv2": 0.422,
+      "category": "Smooth",
+      "material": "FOODS_2_197",
+      "area": "Texas - TX_1"
+    },
+    {
+      "adi": 1.258,
+      "cv2": 0.459,
+      "category": "Smooth",
+      "material": "FOODS_2_197",
+      "area": "Wisconsin - WI_1"
+    },
+    {
+      "adi": 1.003,
+      "cv2": 0.14,
+      "category": "Smooth",
+      "material": "FOODS_3_080",
+      "area": "California - CA_1"
+    },
+    {
+      "adi": 1.003,
+      "cv2": 0.226,
+      "category": "Smooth",
+      "material": "FOODS_3_080",
+      "area": "Texas - TX_1"
+    },
+    {
+      "adi": 1.004,
+      "cv2": 0.177,
+      "category": "Smooth",
+      "material": "FOODS_3_080",
+      "area": "Wisconsin - WI_1"
+    },
+    {
+      "adi": 1.05,
+      "cv2": 0.151,
+      "category": "Smooth",
+      "material": "FOODS_3_099",
+      "area": "California - CA_1"
+    },
+    {
+      "adi": 1.028,
+      "cv2": 0.205,
+      "category": "Smooth",
+      "material": "FOODS_3_099",
+      "area": "Texas - TX_1"
+    },
+    {
+      "adi": 1.059,
+      "cv2": 0.462,
+      "category": "Smooth",
+      "material": "FOODS_3_099",
+      "area": "Wisconsin - WI_1"
+    },
+    {
+      "adi": 1.255,
+      "cv2": 0.605,
+      "category": "Erratic",
+      "material": "FOODS_3_541",
+      "area": "California - CA_1"
+    },
+    {
+      "adi": 1.381,
+      "cv2": 0.946,
+      "category": "Lumpy",
+      "material": "FOODS_3_541",
+      "area": "Texas - TX_1"
+    },
+    {
+      "adi": 1.24,
+      "cv2": 0.678,
+      "category": "Erratic",
+      "material": "FOODS_3_541",
+      "area": "Wisconsin - WI_1"
+    },
+    {
+      "adi": 1.003,
+      "cv2": 0.153,
+      "category": "Smooth",
+      "material": "FOODS_3_555",
+      "area": "California - CA_1"
+    },
+    {
+      "adi": 1.014,
+      "cv2": 0.24,
+      "category": "Smooth",
+      "material": "FOODS_3_555",
+      "area": "Texas - TX_1"
+    },
+    {
+      "adi": 1.009,
+      "cv2": 0.233,
+      "category": "Smooth",
+      "material": "FOODS_3_555",
+      "area": "Wisconsin - WI_1"
+    },
+    {
+      "adi": 1.312,
+      "cv2": 0.242,
+      "category": "Smooth",
+      "material": "FOODS_3_587",
+      "area": "California - CA_1"
+    },
+    {
+      "adi": 1.133,
+      "cv2": 0.206,
+      "category": "Smooth",
+      "material": "FOODS_3_587",
+      "area": "Texas - TX_1"
+    },
+    {
+      "adi": 1.344,
+      "cv2": 0.336,
+      "category": "Intermittent",
+      "material": "FOODS_3_587",
+      "area": "Wisconsin - WI_1"
+    },
+    {
+      "adi": 1.308,
+      "cv2": 0.62,
+      "category": "Erratic",
+      "material": "FOODS_3_635",
+      "area": "California - CA_1"
+    },
+    {
+      "adi": 1.332,
+      "cv2": 0.83,
+      "category": "Lumpy",
+      "material": "FOODS_3_635",
+      "area": "Texas - TX_1"
+    },
+    {
+      "adi": 1.237,
+      "cv2": 0.704,
+      "category": "Erratic",
+      "material": "FOODS_3_635",
+      "area": "Wisconsin - WI_1"
+    },
+    {
+      "adi": 1.103,
+      "cv2": 0.745,
+      "category": "Erratic",
+      "material": "FOODS_3_681",
+      "area": "California - CA_1"
+    },
+    {
+      "adi": 1.117,
+      "cv2": 0.718,
+      "category": "Erratic",
+      "material": "FOODS_3_681",
+      "area": "Texas - TX_1"
+    },
+    {
+      "adi": 2.055,
+      "cv2": 0.667,
+      "category": "Lumpy",
+      "material": "FOODS_3_681",
+      "area": "Wisconsin - WI_1"
+    },
+    {
+      "adi": 1.069,
+      "cv2": 0.45,
+      "category": "Smooth",
+      "material": "FOODS_3_741",
+      "area": "California - CA_1"
+    },
+    {
+      "adi": 1.636,
+      "cv2": 0.61,
+      "category": "Lumpy",
+      "material": "FOODS_3_741",
+      "area": "Texas - TX_1"
+    },
+    {
+      "adi": 1.696,
+      "cv2": 0.707,
+      "category": "Lumpy",
+      "material": "FOODS_3_741",
+      "area": "Wisconsin - WI_1"
+    },
+    {
+      "adi": 1.252,
+      "cv2": 0.619,
+      "category": "Erratic",
+      "material": "FOODS_3_808",
+      "area": "California - CA_1"
+    },
+    {
+      "adi": 1.25,
+      "cv2": 0.758,
+      "category": "Erratic",
+      "material": "FOODS_3_808",
+      "area": "Texas - TX_1"
+    },
+    {
+      "adi": 1.229,
+      "cv2": 0.696,
+      "category": "Erratic",
+      "material": "FOODS_3_808",
+      "area": "Wisconsin - WI_1"
+    },
+    {
+      "adi": 1.388,
+      "cv2": 0.866,
+      "category": "Lumpy",
+      "material": "HOBBIES_1_008",
+      "area": "California - CA_1"
+    },
+    {
+      "adi": 1.808,
+      "cv2": 1.056,
+      "category": "Lumpy",
+      "material": "HOBBIES_1_008",
+      "area": "Texas - TX_1"
+    },
+    {
+      "adi": 1.349,
+      "cv2": 0.631,
+      "category": "Lumpy",
+      "material": "HOBBIES_1_008",
+      "area": "Wisconsin - WI_1"
+    },
+    {
+      "adi": 1.632,
+      "cv2": 0.709,
+      "category": "Lumpy",
+      "material": "HOBBIES_1_048",
+      "area": "California - CA_1"
+    },
+    {
+      "adi": 2.98,
+      "cv2": 1.009,
+      "category": "Lumpy",
+      "material": "HOBBIES_1_048",
+      "area": "Texas - TX_1"
+    },
+    {
+      "adi": 1.638,
+      "cv2": 0.586,
+      "category": "Lumpy",
+      "material": "HOBBIES_1_048",
+      "area": "Wisconsin - WI_1"
+    },
+    {
+      "adi": 1.141,
+      "cv2": 0.987,
+      "category": "Erratic",
+      "material": "HOBBIES_1_254",
+      "area": "California - CA_1"
+    },
+    {
+      "adi": 1.394,
+      "cv2": 1.492,
+      "category": "Lumpy",
+      "material": "HOBBIES_1_254",
+      "area": "Texas - TX_1"
+    },
+    {
+      "adi": 1.548,
+      "cv2": 0.856,
+      "category": "Lumpy",
+      "material": "HOBBIES_1_254",
+      "area": "Wisconsin - WI_1"
+    },
+    {
+      "adi": 1.353,
+      "cv2": 1.0,
+      "category": "Lumpy",
+      "material": "HOBBIES_1_341",
+      "area": "California - CA_1"
+    },
+    {
+      "adi": 1.691,
+      "cv2": 1.728,
+      "category": "Lumpy",
+      "material": "HOBBIES_1_341",
+      "area": "Texas - TX_1"
+    },
+    {
+      "adi": 1.289,
+      "cv2": 0.647,
+      "category": "Erratic",
+      "material": "HOBBIES_1_341",
+      "area": "Wisconsin - WI_1"
+    },
+    {
+      "adi": 1.434,
+      "cv2": 1.071,
+      "category": "Lumpy",
+      "material": "HOBBIES_1_370",
+      "area": "California - CA_1"
+    },
+    {
+      "adi": 1.806,
+      "cv2": 0.865,
+      "category": "Lumpy",
+      "material": "HOBBIES_1_370",
+      "area": "Texas - TX_1"
+    },
+    {
+      "adi": 1.313,
+      "cv2": 0.749,
+      "category": "Erratic",
+      "material": "HOBBIES_1_370",
+      "area": "Wisconsin - WI_1"
+    },
+    {
+      "adi": 1.184,
+      "cv2": 0.479,
+      "category": "Smooth",
+      "material": "HOUSEHOLD_1_303",
+      "area": "California - CA_1"
+    },
+    {
+      "adi": 1.395,
+      "cv2": 0.52,
+      "category": "Lumpy",
+      "material": "HOUSEHOLD_1_303",
+      "area": "Texas - TX_1"
+    },
+    {
+      "adi": 1.256,
+      "cv2": 0.671,
+      "category": "Erratic",
+      "material": "HOUSEHOLD_1_303",
+      "area": "Wisconsin - WI_1"
+    },
+    {
+      "adi": 1.061,
+      "cv2": 0.397,
+      "category": "Smooth",
+      "material": "HOUSEHOLD_1_373",
+      "area": "California - CA_1"
+    },
+    {
+      "adi": 1.036,
+      "cv2": 0.288,
+      "category": "Smooth",
+      "material": "HOUSEHOLD_1_373",
+      "area": "Texas - TX_1"
+    },
+    {
+      "adi": 2.943,
+      "cv2": 0.386,
+      "category": "Intermittent",
+      "material": "HOUSEHOLD_1_373",
+      "area": "Wisconsin - WI_1"
+    },
+    {
+      "adi": 1.675,
+      "cv2": 0.306,
+      "category": "Intermittent",
+      "material": "HOUSEHOLD_1_409",
+      "area": "California - CA_1"
+    },
+    {
+      "adi": 1.528,
+      "cv2": 0.522,
+      "category": "Lumpy",
+      "material": "HOUSEHOLD_1_409",
+      "area": "Texas - TX_1"
+    },
+    {
+      "adi": 1.568,
+      "cv2": 0.442,
+      "category": "Intermittent",
+      "material": "HOUSEHOLD_1_409",
+      "area": "Wisconsin - WI_1"
+    },
+    {
+      "adi": 1.476,
+      "cv2": 0.487,
+      "category": "Intermittent",
+      "material": "HOUSEHOLD_1_418",
+      "area": "California - CA_1"
+    },
+    {
+      "adi": 1.612,
+      "cv2": 0.387,
+      "category": "Intermittent",
+      "material": "HOUSEHOLD_1_418",
+      "area": "Texas - TX_1"
+    },
+    {
+      "adi": 1.569,
+      "cv2": 0.588,
+      "category": "Lumpy",
+      "material": "HOUSEHOLD_1_418",
+      "area": "Wisconsin - WI_1"
+    },
+    {
+      "adi": 1.416,
+      "cv2": 0.38,
+      "category": "Intermittent",
+      "material": "HOUSEHOLD_1_447",
+      "area": "California - CA_1"
+    },
+    {
+      "adi": 1.538,
+      "cv2": 0.413,
+      "category": "Intermittent",
+      "material": "HOUSEHOLD_1_447",
+      "area": "Texas - TX_1"
+    },
+    {
+      "adi": 1.445,
+      "cv2": 0.43,
+      "category": "Intermittent",
+      "material": "HOUSEHOLD_1_447",
+      "area": "Wisconsin - WI_1"
+    },
+    {
+      "adi": 1.458,
+      "cv2": 0.519,
+      "category": "Lumpy",
+      "material": "HOUSEHOLD_1_459",
+      "area": "California - CA_1"
+    },
+    {
+      "adi": 1.409,
+      "cv2": 0.36,
+      "category": "Intermittent",
+      "material": "HOUSEHOLD_1_459",
+      "area": "Texas - TX_1"
+    },
+    {
+      "adi": 1.446,
+      "cv2": 0.523,
+      "category": "Lumpy",
+      "material": "HOUSEHOLD_1_459",
+      "area": "Wisconsin - WI_1"
+    },
+    {
+      "adi": 1.829,
+      "cv2": 0.266,
+      "category": "Intermittent",
+      "material": "HOUSEHOLD_1_514",
+      "area": "California - CA_1"
+    },
+    {
+      "adi": 1.621,
+      "cv2": 0.309,
+      "category": "Intermittent",
+      "material": "HOUSEHOLD_1_514",
+      "area": "Texas - TX_1"
+    },
+    {
+      "adi": 2.181,
+      "cv2": 0.412,
+      "category": "Intermittent",
+      "material": "HOUSEHOLD_1_514",
+      "area": "Wisconsin - WI_1"
+    },
+    {
+      "adi": 1.714,
+      "cv2": 0.263,
+      "category": "Intermittent",
+      "material": "HOUSEHOLD_1_517",
+      "area": "California - CA_1"
+    },
+    {
+      "adi": 1.8,
+      "cv2": 0.449,
+      "category": "Intermittent",
+      "material": "HOUSEHOLD_1_517",
+      "area": "Texas - TX_1"
+    },
+    {
+      "adi": 2.026,
+      "cv2": 0.429,
+      "category": "Intermittent",
+      "material": "HOUSEHOLD_1_517",
+      "area": "Wisconsin - WI_1"
+    },
+    {
+      "adi": 1.239,
+      "cv2": 0.512,
+      "category": "Erratic",
+      "material": "HOUSEHOLD_1_521",
+      "area": "California - CA_1"
+    },
+    {
+      "adi": 1.088,
+      "cv2": 0.457,
+      "category": "Smooth",
+      "material": "HOUSEHOLD_1_521",
+      "area": "Texas - TX_1"
+    },
+    {
+      "adi": 1.263,
+      "cv2": 0.727,
+      "category": "Erratic",
+      "material": "HOUSEHOLD_1_521",
+      "area": "Wisconsin - WI_1"
+    }
+  ],
+  "saved_parquets": {
+    "demand": "data\\processed\\demand.parquet",
+    "lead_time": "data\\processed\\lead_time.parquet",
+    "inventory": "data\\processed\\inventory.parquet",
+    "calendar": "data\\processed\\calendar.parquet"
+  }
+}

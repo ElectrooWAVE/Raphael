@@ -1,0 +1,23 @@
+{
+  "timestamp": "2026-10-04T18:00:27.462069",
+  "total_pairs": 75,
+  "as_of_date": "2016-04-24",
+  "status_breakdown": {
+    "OK": 45,
+    "CRITICAL": 25,
+    "REORDER": 5
+  },
+  "weak_normal_pairs_count": 29,
+  "low_confidence_pairs_count": 30,
+  "extrapolation_pairs_count": 73,
+  "mean_lead_time_days": 7.33,
+  "mean_safety_stock_units": 26.06,
+  "policy_parameters": {
+    "service_level": 0.95,
+    "z_score": 1.6449,
+    "cover_days": 14,
+    "ordering_cost_fixed": 50.0,
+    "holding_cost_annual_rate": 0.2,
+    "unit_cost": 10.0
+  }
+}

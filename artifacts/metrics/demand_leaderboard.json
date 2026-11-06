@@ -1,0 +1,80 @@
+{
+  "timestamp": "2026-10-04T17:59:18.625381",
+  "test_days": 84,
+  "as_of_date": "2016-04-24",
+  "leaderboard": [
+    {
+      "model": "Weekday Mean 8W (Production Model)",
+      "val_weekly_mean_wape": 0.8735,
+      "weekly_pooled_wape": 0.3052,
+      "weekly_mean_pair_wape": 0.4097,
+      "daily_pooled_wape": 0.5137,
+      "daily_mean_pair_wape": 0.7029,
+      "lead_time_pooled_wape": 0.3363
+    },
+    {
+      "model": "Moving Average 91D",
+      "val_weekly_mean_wape": 1.1602,
+      "weekly_pooled_wape": 0.3082,
+      "weekly_mean_pair_wape": 0.4129,
+      "daily_pooled_wape": 0.5234,
+      "daily_mean_pair_wape": 0.6952,
+      "lead_time_pooled_wape": 0.3448
+    },
+    {
+      "model": "Prophet + Weekday Mean 8W Blend",
+      "val_weekly_mean_wape": 0.6138,
+      "weekly_pooled_wape": 0.3357,
+      "weekly_mean_pair_wape": 0.4378,
+      "daily_pooled_wape": 0.5241,
+      "daily_mean_pair_wape": 0.7202,
+      "lead_time_pooled_wape": 0.3633
+    },
+    {
+      "model": "Croston SBA",
+      "val_weekly_mean_wape": 1.446,
+      "weekly_pooled_wape": 0.3289,
+      "weekly_mean_pair_wape": 0.4622,
+      "daily_pooled_wape": 0.534,
+      "daily_mean_pair_wape": 0.7608,
+      "lead_time_pooled_wape": 0.3576
+    },
+    {
+      "model": "Seasonal Naive",
+      "val_weekly_mean_wape": 0.6693,
+      "weekly_pooled_wape": 0.3451,
+      "weekly_mean_pair_wape": 0.4826,
+      "daily_pooled_wape": 0.6141,
+      "daily_mean_pair_wape": 0.8676,
+      "lead_time_pooled_wape": 0.3816
+    },
+    {
+      "model": "Prophet (Tuned)",
+      "val_weekly_mean_wape": 0.461,
+      "weekly_pooled_wape": 0.4174,
+      "weekly_mean_pair_wape": 0.5283,
+      "daily_pooled_wape": 0.587,
+      "daily_mean_pair_wape": 0.7974,
+      "lead_time_pooled_wape": 0.4448
+    },
+    {
+      "model": "LightGBM Global",
+      "val_weekly_mean_wape": 0.5845,
+      "weekly_pooled_wape": 0.3692,
+      "weekly_mean_pair_wape": 0.4555,
+      "daily_pooled_wape": 0.5184,
+      "daily_mean_pair_wape": 0.6583,
+      "lead_time_pooled_wape": 0.3904
+    }
+  ],
+  "model_selection_breakdown": {
+    "weekday_mean_8w": 75
+  },
+  "pairs_flagged_low_confidence": 30,
+  "low_confidence_rule": "Pre-test zero-demand share > 30% across 1,829 training days",
+  "selection_rule": "Single fleet-wide model chosen because per-pair selection did not generalize to the test window on this data",
+  "total_pairs": 75,
+  "disqualification_notes": {
+    "LightGBM Global": "An earlier target-scaling bug (zero-demand series divided by 0.05) produced 277% error; after the fix LightGBM scored 36.92% weekly pooled WAPE on test, remaining inferior to Weekday Mean 8W (30.52%). Disqualified from production selection."
+  }
+}

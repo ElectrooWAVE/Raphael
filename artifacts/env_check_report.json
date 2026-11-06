@@ -1,0 +1,36 @@
+{
+  "timestamp": "2026-10-04T11:23:30.550870",
+  "seed": 42,
+  "config_path": "configs/raphael.yaml",
+  "hardware": {
+    "os": "Windows 11 (10.0.26200)",
+    "python": "3.14.7",
+    "architecture": "AMD64",
+    "cpu_logical": 12,
+    "cpu_physical": 6,
+    "ram_total_gb": 31.11,
+    "ram_available_gb": 16.15,
+    "disk_free_gb": 227.16,
+    "gpu": "PyTorch not installed in this environment"
+  },
+  "packages": {
+    "status": "pass",
+    "installed": {
+      "pandas": "3.0.6",
+      "pyarrow": "25.0.1",
+      "numpy": "2.5.3",
+      "scipy": "1.18.1",
+      "sklearn": "1.9.1",
+      "prophet": "1.4.0",
+      "holidays": "0.105",
+      "joblib": "1.6.0",
+      "yaml": "6.0.3",
+      "tqdm": "4.70.1",
+      "fastapi": "0.142.2",
+      "uvicorn": "0.54.0",
+      "pydantic": "2.13.5"
+    }
+  },
+  "holidays_us": true,
+  "prophet_toy_fit": true
+}

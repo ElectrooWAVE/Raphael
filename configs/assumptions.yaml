@@ -1,0 +1,41 @@
+# Raphael Business Assumptions
+# Values marked 'assumed: true' are not provided in the raw dataset and must be clearly disclosed in the UI.
+
+inventory_policy:
+  service_level:
+    default_value: 0.95
+    z_score: 1.6448536269514722
+    assumed: true
+    description: "Default cycle service level target (95% non-stockout probability per cycle)"
+  
+  review_period_days:
+    default_value: 7
+    assumed: true
+    description: "Periodic inventory review cycle length in days"
+
+  lead_time_buffer_days:
+    default_value: 0
+    assumed: true
+    description: "Additional operational buffer added to supplier lead time"
+
+cost_parameters:
+  holding_cost_annual_rate:
+    default_value: 0.20 # 20% of unit cost per year
+    assumed: true
+    description: "Annual cost to hold one unit of inventory as a fraction of unit cost"
+
+  ordering_cost_fixed:
+    default_value: 50.0 # $50 per order
+    assumed: true
+    description: "Fixed administrative and logistical cost incurred per replenishment purchase order"
+
+  default_unit_cost:
+    default_value: 10.0 # $10 per unit
+    assumed: true
+    description: "Baseline unit procurement cost used for EOQ calculations when not item-specific"
+
+reorder_quantity_policy:
+  mode: "cover_days" # options: "cover_days", "eoq"
+  cover_days: 30
+  assumed: true
+  description: "Target coverage window in days for replenishment order sizing"

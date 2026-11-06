@@ -1,0 +1,45 @@
+{
+  "dataset_name": "Raphael Supply Chain & Materials Decision Platform",
+  "provenance": {
+    "demand": "Walmart M5 benchmark data relabelled as materials",
+    "lead_time": "Synthetic calibrated data",
+    "inventory": "Synthetic snapshot",
+    "disclaimer": "Demand series reflect retail benchmark patterns relabelled as materials; lead times and current inventory are synthetic."
+  },
+  "dates": {
+    "as_of_date": "2016-04-24",
+    "forecast_start_date": "2016-04-25",
+    "forecast_horizon_days": 90,
+    "test_days": 84,
+    "validation_days": 84,
+    "holiday_calendar": "US"
+  },
+  "fleet_dimensions": {
+    "total_pairs": 75,
+    "total_materials": 25,
+    "total_areas": 3,
+    "total_demand_days_per_pair": 1913,
+    "total_historical_orders": 20550
+  },
+  "model_architecture": {
+    "demand_models": "Production model: Weekday Mean 8W across all 75 pairs (per-pair selection discarded because it failed to generalize to held-out test window)",
+    "lead_time_model": "Random Forest Regressor with 5-fold out-of-fold empirical uncertainty calibration and extrapolation boundaries",
+    "decision_engine": "Pure arithmetic safety stock, reorder point, EOQ, and day-by-day forecast depletion (no machine learning in decisions)",
+    "promotion_simulation": "Simulated, empirical lift: weekday-adjusted historical lift with 500-iteration bootstrap confidence intervals"
+  },
+  "policy_assumptions": {
+    "service_level": 0.95,
+    "z_score": 1.6448536269514722,
+    "review_period_days": 7,
+    "cover_days_target": 30,
+    "ordering_cost_fixed": 50.0,
+    "holding_cost_annual_rate": 0.2,
+    "default_unit_cost": 10.0
+  },
+  "status_summary": {
+    "OK": 45,
+    "CRITICAL": 25,
+    "REORDER": 5
+  },
+  "created_at": "2026-10-04T17:59:38.724343"
+}

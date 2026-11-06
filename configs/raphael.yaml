@@ -1,0 +1,94 @@
+# Raphael Master Configuration
+# All file paths, dates, parameters, and schema constraints must be defined here.
+
+app:
+  name: "Raphael"
+  version: "1.0.0"
+  description: "Materials Demand Forecasting, Lead-Time Prediction & Reorder Platform"
+  provenance:
+    demand_origin: "Walmart M5 benchmark data relabelled as materials"
+    lead_time_origin: "Synthetic calibrated data"
+    inventory_origin: "Synthetic snapshot"
+    disclaimer: "Demand series reflect retail benchmark patterns relabelled as materials; lead times and current inventory are synthetic."
+
+dates:
+  as_of_date: "2016-04-24" # Last date in demand history dataset
+  forecast_start_date: "2016-04-25"
+  horizon_days: 90
+  test_days: 84 # 12 whole weeks (7 * 12 = 84 days)
+  validation_days: 84 # Rolling validation fold ending strictly before test set
+  holiday_country: "US" # US calendar matching M5 source data
+
+seeds:
+  default_seed: 42
+
+paths:
+  raw_data:
+    demand: "data/raw/demand_history.csv"
+    lead_time: "data/raw/lead_time_history.csv"
+    inventory: "data/raw/current_inventory.csv"
+    calendar_events: "data/raw/calendar_events_reference.csv"
+  processed_data:
+    dir: "data/processed"
+    demand_parquet: "data/processed/demand.parquet"
+    lead_time_parquet: "data/processed/lead_time.parquet"
+    inventory_parquet: "data/processed/inventory.parquet"
+    calendar_parquet: "data/processed/calendar.parquet"
+  artifacts:
+    dir: "artifacts"
+    forecasts: "artifacts/forecasts"
+    lead_time: "artifacts/lead_time"
+    metrics: "artifacts/metrics"
+    recommendations: "artifacts/recommendations.parquet"
+    promo_scenarios: "artifacts/promo_scenarios.parquet"
+    benchmark: "artifacts/benchmark_telemetry.json"
+  checkpoints:
+    dir: "checkpoints"
+  logs:
+    dir: "logs"
+
+schema:
+  demand:
+    columns:
+      - "date"
+      - "material"
+      - "area"
+      - "quantity"
+      - "is_promotion"
+    expected_pairs: 75
+    expected_materials: 25
+    expected_areas:
+      - "California - CA_1"
+      - "Texas - TX_1"
+      - "Wisconsin - WI_1"
+    start_date: "2011-01-29"
+    end_date: "2016-04-24"
+    expected_rows_per_pair: 1913
+  lead_time:
+    columns:
+      - "material"
+      - "area"
+      - "order_date"
+      - "order_quantity"
+      - "lead_time_days"
+  inventory:
+    columns:
+      - "material"
+      - "area"
+      - "current_stock"
+      - "last_updated"
+      - "stock_status_simulated" # Note: NEVER used in calculations/features/alerts
+    snapshot_date: "2016-04-24"
+
+models:
+  prophet:
+    growth: "linear"
+    yearly_seasonality: true
+    weekly_seasonality: true
+    daily_seasonality: false
+    interval_widths: [0.80, 0.95]
+    clip_floor_zero: true
+  lead_time_rf:
+    n_estimators: 100
+    random_state: 42
+    n_jobs: -1

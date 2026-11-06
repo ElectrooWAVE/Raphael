@@ -1,0 +1,1862 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Raphael API",
+    "description": "Raphael Materials Demand Forecasting, Lead-Time Prediction & Inventory Decisions Platform API",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Get Root",
+        "description": "Root entrypoint providing navigation to documentation and status.",
+        "operationId": "get_root__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Get Health",
+        "description": "System health check and artifact cache readiness.",
+        "operationId": "get_health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/meta": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Get Meta",
+        "description": "Dataset provenance, time-series horizons, model architecture, and policy defaults.",
+        "operationId": "get_meta_meta_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetaResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/materials": {
+      "get": {
+        "tags": [
+          "Catalog"
+        ],
+        "summary": "Get Materials",
+        "description": "List of all 25 materials in the catalog.",
+        "operationId": "get_materials_materials_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/areas": {
+      "get": {
+        "tags": [
+          "Catalog"
+        ],
+        "summary": "Get Areas",
+        "description": "List areas, optionally filtered by material.",
+        "operationId": "get_areas_areas_get",
+        "parameters": [
+          {
+            "name": "material",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional material filter",
+              "title": "Material"
+            },
+            "description": "Optional material filter"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AreasResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/forecast/{material}/{area}": {
+      "get": {
+        "tags": [
+          "Forecast"
+        ],
+        "summary": "Get Forecast",
+        "description": "Get recent demand history (last 60 days) and future 90-day forecast with empirical 80%/95% bands.",
+        "operationId": "get_forecast_forecast__material___area__get",
+        "parameters": [
+          {
+            "name": "material",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Material"
+            }
+          },
+          {
+            "name": "area",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Area"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForecastResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reorder/{material}/{area}": {
+      "get": {
+        "tags": [
+          "Inventory"
+        ],
+        "summary": "Get Reorder",
+        "description": "Get complete inventory decision metrics: ROP, SS, days_remaining, status, L, sigma_L.",
+        "operationId": "get_reorder_reorder__material___area__get",
+        "parameters": [
+          {
+            "name": "material",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Material"
+            }
+          },
+          {
+            "name": "area",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Area"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReorderResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/urgency": {
+      "get": {
+        "tags": [
+          "Inventory"
+        ],
+        "summary": "Get Urgency",
+        "description": "Get full inventory table ranked by urgency (status severity first, then days_remaining).",
+        "operationId": "get_urgency_urgency_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by OK, REORDER, CRITICAL",
+              "title": "Status"
+            },
+            "description": "Filter by OK, REORDER, CRITICAL"
+          },
+          {
+            "name": "material",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by material code",
+              "title": "Material"
+            },
+            "description": "Filter by material code"
+          },
+          {
+            "name": "area",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by geographic area",
+              "title": "Area"
+            },
+            "description": "Filter by geographic area"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UrgencyResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accuracy": {
+      "get": {
+        "tags": [
+          "Telemetry"
+        ],
+        "summary": "Get Accuracy",
+        "description": "Get model competition leaderboard and per-pair accuracy metrics with explicit aggregation levels.",
+        "operationId": "get_accuracy_accuracy_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccuracyResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/leadtime/{material}/{area}": {
+      "get": {
+        "tags": [
+          "LeadTime"
+        ],
+        "summary": "Get Lead Time",
+        "description": "Get Random Forest lead-time prediction, dual spreads, seasonal surge, and quantity bounds.",
+        "operationId": "get_lead_time_leadtime__material___area__get",
+        "parameters": [
+          {
+            "name": "material",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Material"
+            }
+          },
+          {
+            "name": "area",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Area"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadTimeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/whatif": {
+      "post": {
+        "tags": [
+          "Simulator"
+        ],
+        "summary": "Post Whatif",
+        "description": "Recompute inventory decisions (SS, ROP, EOQ, days_remaining, status, stockout probability).\n\nAccepts raw parameters directly (matching tests/inventory_fixtures.json)\nor resolves defaults from a specified material & area.",
+        "operationId": "post_whatif_whatif_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WhatIfRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WhatIfResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/export/recommendations.csv": {
+      "get": {
+        "tags": [
+          "Export"
+        ],
+        "summary": "Export Recommendations Csv",
+        "description": "Download full recommendations table as a CSV file with all assumption flags.",
+        "operationId": "export_recommendations_csv_export_recommendations_csv_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "material",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Material"
+            }
+          },
+          {
+            "name": "area",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Area"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/benchmarks": {
+      "get": {
+        "tags": [
+          "Telemetry"
+        ],
+        "summary": "Get Benchmarks",
+        "description": "Return hardware benchmarks or explicit placeholder.",
+        "operationId": "get_benchmarks_benchmarks_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchmarkResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AccuracyMetrics": {
+        "properties": {
+          "weekly_pooled_wape": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weekly Pooled Wape"
+          },
+          "weekly_pair_wape": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weekly Pair Wape"
+          },
+          "daily_pair_wape": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Pair Wape"
+          },
+          "lead_time_window_pair_wape": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lead Time Window Pair Wape"
+          },
+          "champion_val_wape": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Champion Val Wape"
+          }
+        },
+        "type": "object",
+        "title": "AccuracyMetrics"
+      },
+      "AccuracyResponse": {
+        "properties": {
+          "as_of_date": {
+            "type": "string",
+            "title": "As Of Date"
+          },
+          "test_days": {
+            "type": "integer",
+            "title": "Test Days"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp"
+          },
+          "leaderboard": {
+            "items": {
+              "$ref": "#/components/schemas/LeaderboardItem"
+            },
+            "type": "array",
+            "title": "Leaderboard"
+          },
+          "model_selection_breakdown": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Model Selection Breakdown"
+          },
+          "pairs_flagged_low_confidence": {
+            "type": "integer",
+            "title": "Pairs Flagged Low Confidence"
+          },
+          "total_pairs": {
+            "type": "integer",
+            "title": "Total Pairs"
+          },
+          "per_pair_metrics": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Per Pair Metrics"
+          }
+        },
+        "type": "object",
+        "required": [
+          "as_of_date",
+          "test_days",
+          "timestamp",
+          "leaderboard",
+          "model_selection_breakdown",
+          "pairs_flagged_low_confidence",
+          "total_pairs",
+          "per_pair_metrics"
+        ],
+        "title": "AccuracyResponse"
+      },
+      "AreasResponse": {
+        "properties": {
+          "total_areas": {
+            "type": "integer",
+            "title": "Total Areas"
+          },
+          "material_filter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material Filter"
+          },
+          "areas": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Areas"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total_areas",
+          "areas"
+        ],
+        "title": "AreasResponse"
+      },
+      "BenchmarkResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "not computed yet"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "Hardware benchmarks and live inference latency timings will be populated when scripts/07_benchmark.py is executed in Phase 7/8 on actual deployment hardware."
+          },
+          "detected_hardware": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detected Hardware"
+          },
+          "benchmarks": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmarks"
+          }
+        },
+        "type": "object",
+        "title": "BenchmarkResponse"
+      },
+      "EmpiricalPromotionInfo": {
+        "properties": {
+          "empirical_lift": {
+            "type": "number",
+            "title": "Empirical Lift"
+          },
+          "raw_lift": {
+            "type": "number",
+            "title": "Raw Lift"
+          },
+          "lift_ci_lower_95": {
+            "type": "number",
+            "title": "Lift Ci Lower 95"
+          },
+          "lift_ci_upper_95": {
+            "type": "number",
+            "title": "Lift Ci Upper 95"
+          },
+          "has_measurable_effect": {
+            "type": "boolean",
+            "title": "Has Measurable Effect"
+          },
+          "no_measurable_effect": {
+            "type": "boolean",
+            "title": "No Measurable Effect"
+          },
+          "historical_promo_share": {
+            "type": "number",
+            "title": "Historical Promo Share"
+          },
+          "simulation_method": {
+            "type": "string",
+            "title": "Simulation Method",
+            "default": "Simulated, empirical lift"
+          },
+          "effect_description": {
+            "type": "string",
+            "title": "Effect Description"
+          }
+        },
+        "type": "object",
+        "required": [
+          "empirical_lift",
+          "raw_lift",
+          "lift_ci_lower_95",
+          "lift_ci_upper_95",
+          "has_measurable_effect",
+          "no_measurable_effect",
+          "historical_promo_share",
+          "effect_description"
+        ],
+        "title": "EmpiricalPromotionInfo"
+      },
+      "ForecastDataPoint": {
+        "properties": {
+          "ds": {
+            "type": "string",
+            "title": "Ds"
+          },
+          "yhat": {
+            "type": "number",
+            "title": "Yhat"
+          },
+          "yhat_lower_80": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Yhat Lower 80"
+          },
+          "yhat_upper_80": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Yhat Upper 80"
+          },
+          "yhat_lower_95": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Yhat Lower 95"
+          },
+          "yhat_upper_95": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Yhat Upper 95"
+          },
+          "interval_method": {
+            "type": "string",
+            "title": "Interval Method",
+            "default": "empirical_residual"
+          },
+          "pooled_residuals": {
+            "type": "boolean",
+            "title": "Pooled Residuals",
+            "default": false
+          },
+          "interval_missing_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interval Missing Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ds",
+          "yhat"
+        ],
+        "title": "ForecastDataPoint"
+      },
+      "ForecastResponse": {
+        "properties": {
+          "material": {
+            "type": "string",
+            "title": "Material"
+          },
+          "area": {
+            "type": "string",
+            "title": "Area"
+          },
+          "as_of_date": {
+            "type": "string",
+            "title": "As Of Date"
+          },
+          "model_used": {
+            "type": "string",
+            "title": "Model Used"
+          },
+          "interval_method": {
+            "type": "string",
+            "title": "Interval Method",
+            "default": "empirical_residual"
+          },
+          "pooled_residuals": {
+            "type": "boolean",
+            "title": "Pooled Residuals",
+            "default": false
+          },
+          "interval_missing_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interval Missing Reason"
+          },
+          "low_confidence": {
+            "type": "boolean",
+            "title": "Low Confidence"
+          },
+          "weak_normal_assumption": {
+            "type": "boolean",
+            "title": "Weak Normal Assumption"
+          },
+          "accuracy": {
+            "$ref": "#/components/schemas/AccuracyMetrics"
+          },
+          "empirical_promotion": {
+            "$ref": "#/components/schemas/EmpiricalPromotionInfo"
+          },
+          "history_tail_60d": {
+            "items": {
+              "$ref": "#/components/schemas/HistoryDataPoint"
+            },
+            "type": "array",
+            "title": "History Tail 60D"
+          },
+          "forecast_90d": {
+            "items": {
+              "$ref": "#/components/schemas/ForecastDataPoint"
+            },
+            "type": "array",
+            "title": "Forecast 90D"
+          }
+        },
+        "type": "object",
+        "required": [
+          "material",
+          "area",
+          "as_of_date",
+          "model_used",
+          "low_confidence",
+          "weak_normal_assumption",
+          "accuracy",
+          "empirical_promotion",
+          "history_tail_60d",
+          "forecast_90d"
+        ],
+        "title": "ForecastResponse"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Service health state",
+            "default": "ok"
+          },
+          "app": {
+            "type": "string",
+            "title": "App",
+            "description": "API application title",
+            "default": "Raphael API"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "description": "API semantic version",
+            "default": "1.0.0"
+          },
+          "as_of_date": {
+            "type": "string",
+            "title": "As Of Date",
+            "description": "Dataset freeze date",
+            "default": "2016-04-24"
+          },
+          "artifacts_ready": {
+            "type": "boolean",
+            "title": "Artifacts Ready",
+            "description": "Whether artifacts are loaded into memory",
+            "default": true
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp"
+          }
+        },
+        "type": "object",
+        "title": "HealthResponse"
+      },
+      "HistoryDataPoint": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "quantity": {
+            "type": "number",
+            "title": "Quantity"
+          },
+          "is_promotion": {
+            "type": "integer",
+            "title": "Is Promotion"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "quantity",
+          "is_promotion"
+        ],
+        "title": "HistoryDataPoint"
+      },
+      "LeadTimeResponse": {
+        "properties": {
+          "material": {
+            "type": "string",
+            "title": "Material"
+          },
+          "area": {
+            "type": "string",
+            "title": "Area"
+          },
+          "as_of_date": {
+            "type": "string",
+            "title": "As Of Date"
+          },
+          "predicted_lead_time_upcoming_days": {
+            "type": "number",
+            "title": "Predicted Lead Time Upcoming Days"
+          },
+          "calibrated_lead_time_std": {
+            "type": "number",
+            "title": "Calibrated Lead Time Std"
+          },
+          "tree_spread_lead_time_std": {
+            "type": "number",
+            "title": "Tree Spread Lead Time Std"
+          },
+          "lead_time_holiday_peak_days": {
+            "type": "number",
+            "title": "Lead Time Holiday Peak Days"
+          },
+          "seasonal_holiday_surge_days": {
+            "type": "number",
+            "title": "Seasonal Holiday Surge Days"
+          },
+          "typical_order_quantity": {
+            "type": "number",
+            "title": "Typical Order Quantity"
+          },
+          "hist_p5_order_quantity": {
+            "type": "number",
+            "title": "Hist P5 Order Quantity"
+          },
+          "hist_p95_order_quantity": {
+            "type": "number",
+            "title": "Hist P95 Order Quantity"
+          },
+          "is_extrapolation_warning": {
+            "type": "boolean",
+            "title": "Is Extrapolation Warning"
+          },
+          "caveat_note": {
+            "type": "string",
+            "title": "Caveat Note",
+            "default": "Tree spread standard deviation reflects ensemble disagreement and understates real variability. The calibrated residual std is derived empirically from held-out operational residuals and is used in safety stock calculations."
+          }
+        },
+        "type": "object",
+        "required": [
+          "material",
+          "area",
+          "as_of_date",
+          "predicted_lead_time_upcoming_days",
+          "calibrated_lead_time_std",
+          "tree_spread_lead_time_std",
+          "lead_time_holiday_peak_days",
+          "seasonal_holiday_surge_days",
+          "typical_order_quantity",
+          "hist_p5_order_quantity",
+          "hist_p95_order_quantity",
+          "is_extrapolation_warning"
+        ],
+        "title": "LeadTimeResponse"
+      },
+      "LeaderboardItem": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "val_weekly_mean_wape": {
+            "type": "number",
+            "title": "Val Weekly Mean Wape"
+          },
+          "weekly_pooled_wape": {
+            "type": "number",
+            "title": "Weekly Pooled Wape"
+          },
+          "weekly_mean_pair_wape": {
+            "type": "number",
+            "title": "Weekly Mean Pair Wape"
+          },
+          "daily_pooled_wape": {
+            "type": "number",
+            "title": "Daily Pooled Wape"
+          },
+          "daily_mean_pair_wape": {
+            "type": "number",
+            "title": "Daily Mean Pair Wape"
+          },
+          "lead_time_pooled_wape": {
+            "type": "number",
+            "title": "Lead Time Pooled Wape"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model",
+          "val_weekly_mean_wape",
+          "weekly_pooled_wape",
+          "weekly_mean_pair_wape",
+          "daily_pooled_wape",
+          "daily_mean_pair_wape",
+          "lead_time_pooled_wape"
+        ],
+        "title": "LeaderboardItem"
+      },
+      "MaterialsResponse": {
+        "properties": {
+          "total_materials": {
+            "type": "integer",
+            "title": "Total Materials"
+          },
+          "materials": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Materials"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total_materials",
+          "materials"
+        ],
+        "title": "MaterialsResponse"
+      },
+      "MetaDates": {
+        "properties": {
+          "as_of_date": {
+            "type": "string",
+            "title": "As Of Date"
+          },
+          "forecast_start_date": {
+            "type": "string",
+            "title": "Forecast Start Date"
+          },
+          "forecast_horizon_days": {
+            "type": "integer",
+            "title": "Forecast Horizon Days"
+          },
+          "test_days": {
+            "type": "integer",
+            "title": "Test Days"
+          },
+          "validation_days": {
+            "type": "integer",
+            "title": "Validation Days"
+          },
+          "holiday_calendar": {
+            "type": "string",
+            "title": "Holiday Calendar"
+          }
+        },
+        "type": "object",
+        "required": [
+          "as_of_date",
+          "forecast_start_date",
+          "forecast_horizon_days",
+          "test_days",
+          "validation_days",
+          "holiday_calendar"
+        ],
+        "title": "MetaDates"
+      },
+      "MetaFleet": {
+        "properties": {
+          "total_pairs": {
+            "type": "integer",
+            "title": "Total Pairs"
+          },
+          "total_materials": {
+            "type": "integer",
+            "title": "Total Materials"
+          },
+          "total_areas": {
+            "type": "integer",
+            "title": "Total Areas"
+          },
+          "total_demand_days_per_pair": {
+            "type": "integer",
+            "title": "Total Demand Days Per Pair"
+          },
+          "total_historical_orders": {
+            "type": "integer",
+            "title": "Total Historical Orders"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total_pairs",
+          "total_materials",
+          "total_areas",
+          "total_demand_days_per_pair",
+          "total_historical_orders"
+        ],
+        "title": "MetaFleet"
+      },
+      "MetaPolicyAssumptions": {
+        "properties": {
+          "service_level": {
+            "type": "number",
+            "title": "Service Level"
+          },
+          "z_score": {
+            "type": "number",
+            "title": "Z Score"
+          },
+          "review_period_days": {
+            "type": "integer",
+            "title": "Review Period Days"
+          },
+          "cover_days_target": {
+            "type": "integer",
+            "title": "Cover Days Target"
+          },
+          "ordering_cost_fixed": {
+            "type": "number",
+            "title": "Ordering Cost Fixed"
+          },
+          "holding_cost_annual_rate": {
+            "type": "number",
+            "title": "Holding Cost Annual Rate"
+          },
+          "default_unit_cost": {
+            "type": "number",
+            "title": "Default Unit Cost"
+          }
+        },
+        "type": "object",
+        "required": [
+          "service_level",
+          "z_score",
+          "review_period_days",
+          "cover_days_target",
+          "ordering_cost_fixed",
+          "holding_cost_annual_rate",
+          "default_unit_cost"
+        ],
+        "title": "MetaPolicyAssumptions"
+      },
+      "MetaProvenance": {
+        "properties": {
+          "demand": {
+            "type": "string",
+            "title": "Demand"
+          },
+          "lead_time": {
+            "type": "string",
+            "title": "Lead Time"
+          },
+          "inventory": {
+            "type": "string",
+            "title": "Inventory"
+          },
+          "disclaimer": {
+            "type": "string",
+            "title": "Disclaimer"
+          }
+        },
+        "type": "object",
+        "required": [
+          "demand",
+          "lead_time",
+          "inventory",
+          "disclaimer"
+        ],
+        "title": "MetaProvenance"
+      },
+      "MetaResponse": {
+        "properties": {
+          "dataset_name": {
+            "type": "string",
+            "title": "Dataset Name"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/MetaProvenance"
+          },
+          "dates": {
+            "$ref": "#/components/schemas/MetaDates"
+          },
+          "fleet_dimensions": {
+            "$ref": "#/components/schemas/MetaFleet"
+          },
+          "model_architecture": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Model Architecture"
+          },
+          "policy_assumptions": {
+            "$ref": "#/components/schemas/MetaPolicyAssumptions"
+          },
+          "status_summary": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Status Summary"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dataset_name",
+          "provenance",
+          "dates",
+          "fleet_dimensions",
+          "model_architecture",
+          "policy_assumptions",
+          "status_summary",
+          "created_at"
+        ],
+        "title": "MetaResponse"
+      },
+      "ReorderResponse": {
+        "properties": {
+          "material": {
+            "type": "string",
+            "title": "Material"
+          },
+          "area": {
+            "type": "string",
+            "title": "Area"
+          },
+          "as_of_date": {
+            "type": "string",
+            "title": "As Of Date"
+          },
+          "current_stock": {
+            "type": "number",
+            "title": "Current Stock"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "urgency_rank": {
+            "type": "integer",
+            "title": "Urgency Rank"
+          },
+          "days_remaining": {
+            "type": "number",
+            "title": "Days Remaining"
+          },
+          "days_remaining_label": {
+            "type": "string",
+            "title": "Days Remaining Label"
+          },
+          "beyond_horizon": {
+            "type": "boolean",
+            "title": "Beyond Horizon"
+          },
+          "reorder_point_rop": {
+            "type": "number",
+            "title": "Reorder Point Rop"
+          },
+          "safety_stock_ss": {
+            "type": "number",
+            "title": "Safety Stock Ss"
+          },
+          "demand_rate_d": {
+            "type": "number",
+            "title": "Demand Rate D"
+          },
+          "demand_window_days": {
+            "type": "integer",
+            "title": "Demand Window Days"
+          },
+          "demand_error_std_sigma_d": {
+            "type": "number",
+            "title": "Demand Error Std Sigma D"
+          },
+          "predicted_lead_time_days": {
+            "type": "number",
+            "title": "Predicted Lead Time Days"
+          },
+          "calibrated_lead_time_std_sigma_l": {
+            "type": "number",
+            "title": "Calibrated Lead Time Std Sigma L"
+          },
+          "tree_spread_lead_time_std": {
+            "type": "number",
+            "title": "Tree Spread Lead Time Std"
+          },
+          "recommended_order_quantity": {
+            "type": "number",
+            "title": "Recommended Order Quantity"
+          },
+          "raw_order_quantity_14d": {
+            "type": "number",
+            "title": "Raw Order Quantity 14D"
+          },
+          "eoq_quantity": {
+            "type": "number",
+            "title": "Eoq Quantity"
+          },
+          "hist_p5_order_quantity": {
+            "type": "number",
+            "title": "Hist P5 Order Quantity"
+          },
+          "hist_p95_order_quantity": {
+            "type": "number",
+            "title": "Hist P95 Order Quantity"
+          },
+          "is_quantity_extrapolation": {
+            "type": "boolean",
+            "title": "Is Quantity Extrapolation"
+          },
+          "champion_model": {
+            "type": "string",
+            "title": "Champion Model"
+          },
+          "low_confidence": {
+            "type": "boolean",
+            "title": "Low Confidence"
+          },
+          "zero_demand_share": {
+            "type": "number",
+            "title": "Zero Demand Share"
+          },
+          "weak_normal_assumption": {
+            "type": "boolean",
+            "title": "Weak Normal Assumption"
+          },
+          "stock_to_rop_ratio": {
+            "type": "number",
+            "title": "Stock To Rop Ratio"
+          },
+          "service_level_target": {
+            "type": "number",
+            "title": "Service Level Target",
+            "default": 0.95
+          },
+          "service_level_assumed": {
+            "type": "boolean",
+            "title": "Service Level Assumed",
+            "default": true
+          },
+          "costs_assumed": {
+            "type": "boolean",
+            "title": "Costs Assumed",
+            "default": true
+          },
+          "cover_days_assumed": {
+            "type": "boolean",
+            "title": "Cover Days Assumed",
+            "default": true
+          },
+          "cover_days_target": {
+            "type": "integer",
+            "title": "Cover Days Target",
+            "default": 14
+          }
+        },
+        "type": "object",
+        "required": [
+          "material",
+          "area",
+          "as_of_date",
+          "current_stock",
+          "status",
+          "urgency_rank",
+          "days_remaining",
+          "days_remaining_label",
+          "beyond_horizon",
+          "reorder_point_rop",
+          "safety_stock_ss",
+          "demand_rate_d",
+          "demand_window_days",
+          "demand_error_std_sigma_d",
+          "predicted_lead_time_days",
+          "calibrated_lead_time_std_sigma_l",
+          "tree_spread_lead_time_std",
+          "recommended_order_quantity",
+          "raw_order_quantity_14d",
+          "eoq_quantity",
+          "hist_p5_order_quantity",
+          "hist_p95_order_quantity",
+          "is_quantity_extrapolation",
+          "champion_model",
+          "low_confidence",
+          "zero_demand_share",
+          "weak_normal_assumption",
+          "stock_to_rop_ratio"
+        ],
+        "title": "ReorderResponse"
+      },
+      "UrgencyResponse": {
+        "properties": {
+          "as_of_date": {
+            "type": "string",
+            "title": "As Of Date"
+          },
+          "total_pairs": {
+            "type": "integer",
+            "title": "Total Pairs"
+          },
+          "filtered_pairs": {
+            "type": "integer",
+            "title": "Filtered Pairs"
+          },
+          "status_breakdown": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Status Breakdown"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ReorderResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "as_of_date",
+          "total_pairs",
+          "filtered_pairs",
+          "status_breakdown",
+          "items"
+        ],
+        "title": "UrgencyResponse"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "WhatIfRequest": {
+        "properties": {
+          "material": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material"
+          },
+          "area": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Area"
+          },
+          "demand_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Demand Rate"
+          },
+          "demand_std": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Demand Std"
+          },
+          "lead_time": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lead Time"
+          },
+          "lead_time_std": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lead Time Std"
+          },
+          "service_level": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Level",
+            "default": 0.95
+          },
+          "current_stock": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Stock"
+          },
+          "daily_forecasts": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Forecasts"
+          },
+          "ordering_cost_fixed": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ordering Cost Fixed",
+            "default": 50.0
+          },
+          "holding_cost_annual_unit": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holding Cost Annual Unit",
+            "default": 2.0
+          },
+          "demand_shock_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Demand Shock Pct",
+            "default": 0.0
+          }
+        },
+        "type": "object",
+        "title": "WhatIfRequest"
+      },
+      "WhatIfResponse": {
+        "properties": {
+          "demand_rate": {
+            "type": "number",
+            "title": "Demand Rate"
+          },
+          "demand_std": {
+            "type": "number",
+            "title": "Demand Std"
+          },
+          "lead_time": {
+            "type": "number",
+            "title": "Lead Time"
+          },
+          "lead_time_std": {
+            "type": "number",
+            "title": "Lead Time Std"
+          },
+          "service_level": {
+            "type": "number",
+            "title": "Service Level"
+          },
+          "current_stock": {
+            "type": "number",
+            "title": "Current Stock"
+          },
+          "safety_stock_ss": {
+            "type": "number",
+            "title": "Safety Stock Ss"
+          },
+          "reorder_point_rop": {
+            "type": "number",
+            "title": "Reorder Point Rop"
+          },
+          "eoq_quantity": {
+            "type": "number",
+            "title": "Eoq Quantity"
+          },
+          "days_remaining": {
+            "type": "number",
+            "title": "Days Remaining"
+          },
+          "beyond_horizon": {
+            "type": "boolean",
+            "title": "Beyond Horizon"
+          },
+          "days_remaining_label": {
+            "type": "string",
+            "title": "Days Remaining Label"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "stockout_probability_per_cycle": {
+            "type": "number",
+            "title": "Stockout Probability Per Cycle"
+          },
+          "demand_shock_pct_applied": {
+            "type": "number",
+            "title": "Demand Shock Pct Applied"
+          },
+          "stockout_model_note": {
+            "type": "string",
+            "title": "Stockout Model Note",
+            "default": "Stockout probability is computed via the normal lead-time demand model P(LTD > stock) = 1 - Phi((stock - mu_LTD) / sigma_LTD). Assumes normally distributed lead-time demand; weak approximation for intermittent or zero-demand items."
+          }
+        },
+        "type": "object",
+        "required": [
+          "demand_rate",
+          "demand_std",
+          "lead_time",
+          "lead_time_std",
+          "service_level",
+          "current_stock",
+          "safety_stock_ss",
+          "reorder_point_rop",
+          "eoq_quantity",
+          "days_remaining",
+          "beyond_horizon",
+          "days_remaining_label",
+          "status",
+          "stockout_probability_per_cycle",
+          "demand_shock_pct_applied"
+        ],
+        "title": "WhatIfResponse"
+      }
+    }
+  }
+}

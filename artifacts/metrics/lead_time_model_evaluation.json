@@ -1,0 +1,54 @@
+{
+  "timestamp": "2026-10-04T12:16:40.607936",
+  "total_test_orders": 4110,
+  "split_date": "2015-04-11",
+  "overall": {
+    "rf_mae": 0.76,
+    "baseline_mae": 1.595,
+    "rf_rmse": 0.993,
+    "baseline_rmse": 1.978,
+    "rf_r2": 0.785,
+    "baseline_r2": 0.147,
+    "mean_tree_spread_std": 0.62,
+    "overall_calibrated_std": 1.044,
+    "tree_std_coverage_95": 0.7686,
+    "calibrated_coverage_95": 0.9586
+  },
+  "area_breakdown": {
+    "California - CA_1": {
+      "test_orders": 1371,
+      "actual_mean": 4.14,
+      "rf_mae": 0.644,
+      "base_mae": 1.495,
+      "rf_rmse": 0.876,
+      "tree_std_coverage_95": 0.7921,
+      "calibrated_coverage_95": 0.9606
+    },
+    "Texas - TX_1": {
+      "test_orders": 1368,
+      "actual_mean": 5.14,
+      "rf_mae": 0.751,
+      "base_mae": 1.575,
+      "rf_rmse": 0.96,
+      "tree_std_coverage_95": 0.7807,
+      "calibrated_coverage_95": 0.9569
+    },
+    "Wisconsin - WI_1": {
+      "test_orders": 1371,
+      "actual_mean": 6.21,
+      "rf_mae": 0.886,
+      "base_mae": 1.714,
+      "rf_rmse": 1.127,
+      "tree_std_coverage_95": 0.733,
+      "calibrated_coverage_95": 0.9584
+    }
+  },
+  "calibrated_uncertainties": {
+    "California - CA_1_holiday_0": 0.9038,
+    "California - CA_1_holiday_1": 1.0227,
+    "Texas - TX_1_holiday_0": 0.9636,
+    "Texas - TX_1_holiday_1": 1.2934,
+    "Wisconsin - WI_1_holiday_0": 1.1192,
+    "Wisconsin - WI_1_holiday_1": 1.3974
+  }
+}

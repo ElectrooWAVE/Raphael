@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Data & Models (rules.md: Never commit raw data or model weights)
+data/raw/
+data/processed/
+artifacts/models/
+checkpoints/
+logs/
+*.parquet
+*.pkl
+*.joblib
+*.stan
+
+# Node & Frontend
+node_modules/
+.next/
+out/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Environment & Secrets
+.env
+.env*.local
+*.pem
+secrets/
+
+# IDE & OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+.tmp_edge/
+done.txt
+verify_out.txt
+
+
