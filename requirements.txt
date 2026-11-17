@@ -1,0 +1,12 @@
+# Install PyTorch FIRST (see README: RTX 5060 Ti needs the CUDA 12.8 build), then:
+#   pip install -r requirements.txt
+chronos-forecasting>=2.3.2,<3   # official Amazon package, provides Chronos2Pipeline
+torch>=2.7.0                    # already satisfied if installed from the cu128 index
+pandas>=2.0,<4
+numpy>=1.26,<3
+streamlit>=1.40
+plotly>=5.24
+fastapi>=0.115
+uvicorn[standard]>=0.32
+httpx>=0.27
+pytest>=8.0
