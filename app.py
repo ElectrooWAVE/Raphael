@@ -61,12 +61,12 @@ if saved and saved[0] == series_id:
     st.subheader("Forecast")
     st.plotly_chart(combined_figure(history, res), use_container_width=True)
     m1, m2, m3 = st.columns(3)
-    m1.metric(f"Total predicted demand ({h} days)", f"{res['mean'].sum():,.0f} units")
-    m2.metric("Average daily predicted demand", f"{res['mean'].mean():,.1f} units")
+    m1.metric(f"Total predicted demand ({h} days)", f"{res['expected'].sum():,.0f} units")
+    m2.metric("Average daily expected demand", f"{res['expected'].mean():,.1f} units")
     m3.metric("Forecast period", f"{res['date'].min():%d %b} - {res['date'].max():%d %b %Y}")
     with st.expander("Forecast table"):
         st.dataframe(res.round(2), use_container_width=True, hide_index=True)
-    st.caption("Point forecast = Chronos-2 mean prediction. Negative values are clipped to 0.")
+    st.caption("Daily line = Chronos-2 median prediction; total/average = expected demand (0.05-0.95 quantiles). Negative values are clipped to 0.")
 
 with st.expander("Model information", expanded=False):
     st.markdown(

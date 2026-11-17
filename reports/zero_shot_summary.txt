@@ -1,0 +1,24 @@
+Chronos-2 Zero-Shot Rolling Evaluation (5 origins x 28 days, 75 series, device=cuda)
+==========================================================================================
+OVERALL
+Chronos-2 (mean)     | MAE= 3.619 | WAPE= 47.2% | Bias= -0.802 | Cov80=74.4%
+Chronos-2 (q50)      | MAE= 3.619 | WAPE= 47.2% | Bias= -0.802 | Cov80=74.4%
+28-day mean          | MAE= 3.959 | WAPE= 51.6% | Bias= -0.031 | Cov80=n/a
+Seasonal naive       | MAE= 4.855 | WAPE= 63.3% | Bias= +0.122 | Cov80=n/a
+
+TOP 10 WORST SERIES BY CHRONOS-2 (mean) WAPE
+  FOODS_3_541 | Texas - TX_1             | WAPE=145.3% | MAE= 1.131 | Bias= -0.353 | Cov80=36.4% | Zeros=27.6%
+  FOODS_3_635 | Texas - TX_1             | WAPE=123.8% | MAE= 1.672 | Bias= -0.398 | Cov80=57.9% | Zeros=24.9%
+  FOODS_3_541 | California - CA_1        | WAPE=119.1% | MAE= 1.684 | Bias= -0.045 | Cov80=43.6% | Zeros=20.3%
+  FOODS_3_541 | Wisconsin - WI_1         | WAPE=116.5% | MAE= 3.702 | Bias= -0.796 | Cov80=52.9% | Zeros=19.3%
+  FOODS_3_808 | California - CA_1        | WAPE=115.4% | MAE= 3.074 | Bias= -0.209 | Cov80=59.3% | Zeros=20.1%
+  FOODS_3_808 | Texas - TX_1             | WAPE=110.5% | MAE= 2.873 | Bias= +0.335 | Cov80=66.4% | Zeros=20.0%
+  FOODS_3_635 | California - CA_1        | WAPE=107.4% | MAE= 1.404 | Bias= -0.352 | Cov80=42.9% | Zeros=23.5%
+  HOBBIES_1_008 | Texas - TX_1           | WAPE=103.4% | MAE= 0.938 | Bias= -0.683 | Cov80=68.6% | Zeros=44.7%
+  FOODS_3_635 | Wisconsin - WI_1         | WAPE=100.7% | MAE= 3.237 | Bias= -0.569 | Cov80=62.1% | Zeros=19.1%
+  FOODS_3_808 | Wisconsin - WI_1         | WAPE= 99.5% | MAE= 3.178 | Bias= +0.367 | Cov80=60.0% | Zeros=18.6%
+
+ERROR BY ZERO-SALES SHARE
+  <20%   (26 series): Mean MAE= 4.478 WAPE= 38.8% | Q50 MAE= 4.478 WAPE= 38.8% | Cov80=75.6% | Mean28 MAE= 4.951 | SNaive MAE= 6.019
+  20-60% (46 series): Mean MAE= 3.234 WAPE= 55.7% | Q50 MAE= 3.234 WAPE= 55.7% | Cov80=73.3% | Mean28 MAE= 3.499 | SNaive MAE= 4.325
+  >60%   ( 3 series): Mean MAE= 2.083 WAPE= 81.2% | Q50 MAE= 2.083 WAPE= 81.2% | Cov80=82.1% | Mean28 MAE= 2.420 | SNaive MAE= 2.893

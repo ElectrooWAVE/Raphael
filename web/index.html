@@ -9,13 +9,16 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" defer></script>
-  <script src="app.js" defer></script>
+  <script type="module" src="app.js"></script>
 </head>
 <body>
   <div class="page">
     <header class="topbar">
       <h1>Retail Product Demand Forecasting</h1>
-      <span class="pill">Forecasts by Amazon Chronos-2</span>
+      <div class="topbar-pills">
+        <span class="pill">Forecasts by Amazon Chronos-2</span>
+        <span id="device-pill" class="pill pill-device" hidden></span>
+      </div>
     </header>
 
     <main>
@@ -23,21 +26,26 @@
         <div class="controls-grid">
           <div class="field">
             <label for="product-select" class="section-label">Product</label>
-            <select id="product-select" disabled>
-              <option value="">Loading products...</option>
-            </select>
+            <div class="select-wrap">
+              <select id="product-select" disabled>
+                <option value="">Loading products...</option>
+              </select>
+            </div>
           </div>
 
           <div class="field">
             <label for="store-select" class="section-label">Store</label>
-            <select id="store-select" disabled>
-              <option value="">Loading stores...</option>
-            </select>
+            <div class="select-wrap">
+              <select id="store-select" disabled>
+                <option value="">Loading stores...</option>
+              </select>
+            </div>
           </div>
 
           <div class="field">
             <span id="horizon-label" class="section-label">Horizon (days)</span>
             <div id="horizon-group" class="segmented" role="radiogroup" aria-labelledby="horizon-label">
+              <span id="horizon-highlight" class="segmented-highlight" aria-hidden="true"></span>
               <button type="button" role="radio" aria-checked="false" data-horizon="7" tabindex="-1">7</button>
               <button type="button" role="radio" aria-checked="false" data-horizon="14" tabindex="-1">14</button>
               <button type="button" role="radio" aria-checked="true" data-horizon="28" tabindex="0">28</button>
@@ -47,17 +55,17 @@
           </div>
 
           <div class="field field-action">
-            <button id="generate-btn" type="button" class="btn-primary" disabled>Generate Forecast</button>
+            <button id="generate-btn" type="button" class="btn-primary" disabled>
+              <span id="btn-spinner" class="spinner" aria-hidden="true" hidden></span>
+              <span id="btn-label">Generate Forecast</span>
+            </button>
           </div>
         </div>
       </section>
 
       <div class="status-bar" aria-live="polite">
         <p id="data-summary" class="summary-line">Loading products...</p>
-        <div id="loading-status" class="loading-status" hidden>
-          <span class="spinner" aria-hidden="true"></span>
-          <span id="loading-text">Running Chronos-2 inference...</span>
-        </div>
+        <p id="loading-text" class="loading-text" hidden>Running Chronos-2 inference...</p>
         <p id="empty-hint" class="empty-hint">Select a product and click Generate Forecast</p>
         <div id="error-banner" class="error-banner" role="alert" hidden></div>
       </div>
@@ -65,37 +73,77 @@
       <section class="kpi-row" aria-label="Forecast summary">
         <div class="panel kpi-block">
           <div id="kpi-total-label" class="section-label">Total predicted demand (28 days)</div>
-          <div id="kpi-total-value" class="kpi-value">-</div>
+          <div class="kpi-value-row">
+            <span id="kpi-total-value" class="kpi-value">-</span>
+            <span id="kpi-total-unit" class="kpi-unit" hidden>units</span>
+          </div>
         </div>
         <div class="panel kpi-block">
           <div class="section-label">Average daily predicted demand</div>
-          <div id="kpi-avg-value" class="kpi-value">-</div>
+          <div class="kpi-value-row">
+            <span id="kpi-avg-value" class="kpi-value">-</span>
+            <span id="kpi-avg-unit" class="kpi-unit" hidden>units/day</span>
+          </div>
         </div>
         <div class="panel kpi-block">
           <div id="kpi-change-label" class="section-label">vs previous 28 days</div>
-          <div id="kpi-change-value" class="kpi-value">-</div>
+          <div class="kpi-value-row">
+            <span id="kpi-change-value" class="kpi-value">-</span>
+          </div>
         </div>
       </section>
 
       <section class="panel chart-panel" aria-label="Demand chart">
-        <div id="chart" class="chart-container"></div>
+        <div class="chart-header">
+          <div class="chart-strip" aria-label="Series dates and peak">
+            <div class="strip-item">
+              <span class="strip-label">Last actual day</span>
+              <span id="strip-last-actual" class="strip-val">-</span>
+            </div>
+            <div class="strip-item">
+              <span class="strip-label">Forecast period</span>
+              <span id="strip-period" class="strip-val">-</span>
+            </div>
+            <div class="strip-item">
+              <span class="strip-label">Peak forecast day</span>
+              <span id="strip-peak" class="strip-val">-</span>
+            </div>
+          </div>
+
+          <div id="range-group" class="range-buttons" role="group" aria-label="Chart zoom range">
+            <button type="button" class="range-btn" data-range="1M">1M</button>
+            <button type="button" class="range-btn" data-range="3M">3M</button>
+            <button type="button" class="range-btn" data-range="6M">6M</button>
+            <button type="button" class="range-btn" data-range="1Y">1Y</button>
+            <button type="button" class="range-btn" data-range="ALL" aria-pressed="true">All</button>
+          </div>
+        </div>
+
+        <div class="chart-stage">
+          <div id="chart-skeleton" class="chart-skeleton" hidden aria-hidden="true"></div>
+          <div id="chart" class="chart-container"></div>
+        </div>
       </section>
 
       <details id="forecast-details" class="panel details-panel">
-        <summary class="details-summary">Forecast data</summary>
+        <summary class="details-summary">
+          <span>Forecast data</span>
+          <button id="download-csv-btn" type="button" class="btn-secondary" disabled>Download CSV</button>
+        </summary>
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
                 <th scope="col">Date</th>
-                <th scope="col" class="num">Predicted</th>
+                <th scope="col" class="num">Median</th>
+                <th scope="col" class="num">Expected</th>
                 <th scope="col" class="num">Low (10th)</th>
                 <th scope="col" class="num">High (90th)</th>
               </tr>
             </thead>
             <tbody id="forecast-tbody">
               <tr>
-                <td colspan="4" class="muted-cell">Generate a forecast to view daily values.</td>
+                <td colspan="5" class="muted-cell">Generate a forecast to view daily values.</td>
               </tr>
             </tbody>
           </table>
@@ -122,7 +170,7 @@
             <dd>Full daily sales history of the selected product-store</dd>
           </div>
         </dl>
-        <p class="about-note">Negative values are clipped to zero. Interval shows the 10th to 90th percentile.</p>
+        <p class="about-note">Daily line shows the Chronos-2 median (50th percentile); totals and daily average use expected demand approximated from 0.05-0.95 quantiles. Negative values are clipped to zero.</p>
       </section>
     </main>
   </div>

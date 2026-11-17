@@ -5,6 +5,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = PROJECT_ROOT / "data"
 
 MODEL_ID = "amazon/chronos-2"        # official pretrained weights (120M params)
+MODEL_PATH = MODEL_ID                # optional: set to "models/<tag>" to test a fine-tuned checkpoint
+CONTEXT_LENGTH: int | None = None    # set to winning validation context_length (None = model default)
+CROSS_LEARNING: bool = False         # set to winning validation cross_learning flag
 DEFAULT_HORIZON = 28
 MIN_HORIZON, MAX_HORIZON = 7, 90
 QUANTILES = [0.1, 0.5, 0.9]

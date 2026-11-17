@@ -2,16 +2,10 @@
 from __future__ import annotations
 
 import math
-import sys
-from pathlib import Path
 
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
-
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 from rdf.config import DATA_DIR, MODEL_ID
 from server.main import app
@@ -90,12 +84,12 @@ def test_post_forecast_real_chronos2(client: TestClient, raw_df: pd.DataFrame):
     assert data["model"] == MODEL_ID
     assert data["device"] in ("cuda", "cpu")
 
-    for key in ("mean", "q10", "q50", "q90"):
+    for key in ("median", "expected", "q10", "q50", "q90"):
         vals = data[key]
         assert len(vals) == 28
         assert all(math.isfinite(v) and v >= 0.0 for v in vals)
 
     assert math.isfinite(data["total"])
     assert math.isfinite(data["daily_average"])
-    assert data["total"] == pytest.approx(sum(data["mean"]), rel=1e-6)
-    assert data["daily_average"] == pytest.approx(sum(data["mean"]) / 28, rel=1e-6)
+    assert data["total"] == pytest.approx(sum(data["expected"]), rel=1e-6)
+    assert data["daily_average"] == pytest.approx(sum(data["expected"]) / 28, rel=1e-6)

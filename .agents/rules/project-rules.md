@@ -15,7 +15,7 @@ Forecasting model: Amazon Chronos-2 (`amazon/chronos-2`) via the official `chron
    NVIDIA RTX 5060 Ti. If another dependency change is needed, ask me first.
 5. Use the project virtual environment (`.venv`). Never install packages globally.
 6. UI code lives in `web/` (HTML/CSS/JS) and the API in `server/`; business logic stays in `src/rdf/`. Keep `app.py` (Streamlit) untouched.
-7. Light, minimal UI only: no gradients, animations or decorative cards.
+7. Light, minimal, or subtle neumorphic (soft-UI) styling with mandatory WCAG AA contrast; short purposeful 2D animations (chart reveal, number count-up, hover/press) allowed and disabled under prefers-reduced-motion.
 8. After every change run `pytest -q`. Do not say "done" unless tests pass, and paste the actual output.
 9. Never invent results. If something could not be run, say so plainly.
 10. Tests of the forecast endpoint use the real Chronos-2 model. Never use mocks or stubs for forecasting.

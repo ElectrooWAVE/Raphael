@@ -104,12 +104,13 @@ def api_forecast(req: ForecastRequest) -> dict[str, Any]:
 
     return {
         "dates": [pd.Timestamp(d).strftime("%Y-%m-%d") for d in res["date"]],
-        "mean": [float(v) for v in res["mean"]],
+        "median": [float(v) for v in res["median"]],
+        "expected": [float(v) for v in res["expected"]],
         "q10": [float(v) for v in res["q10"]],
         "q50": [float(v) for v in res["q50"]],
         "q90": [float(v) for v in res["q90"]],
-        "total": float(res["mean"].sum()),
-        "daily_average": float(res["mean"].mean()),
+        "total": float(res["expected"].sum()),
+        "daily_average": float(res["expected"].mean()),
         "device": app.state.device,
         "model": config.MODEL_ID,
     }

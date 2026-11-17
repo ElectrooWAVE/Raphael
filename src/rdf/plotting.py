@@ -36,6 +36,6 @@ def combined_figure(s: pd.DataFrame, f: pd.DataFrame, history_days: int = 180) -
     fig.add_scatter(x=f["date"], y=f["q90"], mode="lines", line=dict(width=0), showlegend=False, hoverinfo="skip")
     fig.add_scatter(x=f["date"], y=f["q10"], mode="lines", line=dict(width=0), fill="tonexty",
                     fillcolor=BAND, name="80% interval (10th-90th pct)", hoverinfo="skip")
-    fig.add_scatter(x=f["date"], y=f["mean"], mode="lines", name="Predicted demand",
+    fig.add_scatter(x=f["date"], y=f["median"], mode="lines", name="Predicted demand (median)",
                     line=dict(color=FCST, width=2))
     return fig

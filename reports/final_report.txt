@@ -1,0 +1,87 @@
+FINAL TEST WINDOW REPORT (last 28 days, 75 series, device=cuda)
+Chosen pipeline: ctx=365|cross=True | covariates=False
+================================================================================================
+OVERALL
+Chosen (median)            | MAE= 3.722 | WAPE= 49.0% | Bias= -0.500 | Cov80=71.1% | 28d-TotMAE= 59.84
+Chosen (expected)          | MAE= 3.954 | WAPE= 52.0% | Bias= +0.392 | Cov80=71.1% | 28d-TotMAE= 57.17
+Zero-Shot (median)         | MAE= 3.533 | WAPE= 46.5% | Bias= -0.234 | Cov80=68.3% | 28d-TotMAE= 49.55
+Zero-Shot (expected)       | MAE= 3.725 | WAPE= 49.0% | Bias= +0.617 | Cov80=68.3% | 28d-TotMAE= 48.16
+28-day mean baseline       | MAE= 4.063 | WAPE= 53.4% | Bias= +0.272 | Cov80=  n/a | 28d-TotMAE= 56.59
+Seasonal naive baseline    | MAE= 5.249 | WAPE= 69.1% | Bias= +0.671 | Cov80=  n/a | 28d-TotMAE= 68.88
+
+PER-SERIES (Chosen expected vs Zero-Shot expected)
+  FOODS_2_019 | California - CA_1        | MAE= 4.22 (ZS  4.61) | WAPE= 25.7% | Bias= -1.09 | Cov80=89.3% | TotErr=  -30.5
+  FOODS_2_019 | Texas - TX_1             | MAE= 1.42 (ZS  1.39) | WAPE= 69.6% | Bias= -0.14 | Cov80=71.4% | TotErr=   -4.0
+  FOODS_2_019 | Wisconsin - WI_1         | MAE= 0.87 (ZS  0.88) | WAPE= 90.6% | Bias= +0.06 | Cov80=42.9% | TotErr=   +1.8
+  FOODS_2_197 | California - CA_1        | MAE= 6.30 (ZS  7.55) | WAPE= 31.6% | Bias= -4.05 | Cov80=71.4% | TotErr= -113.3
+  FOODS_2_197 | Texas - TX_1             | MAE= 1.75 (ZS  1.66) | WAPE= 55.0% | Bias= +0.21 | Cov80=85.7% | TotErr=   +5.9
+  FOODS_2_197 | Wisconsin - WI_1         | MAE= 1.54 (ZS  1.46) | WAPE= 74.4% | Bias= +0.33 | Cov80=67.9% | TotErr=   +9.1
+  FOODS_3_080 | California - CA_1        | MAE= 4.79 (ZS  4.84) | WAPE= 25.8% | Bias= +0.43 | Cov80=75.0% | TotErr=  +12.0
+  FOODS_3_080 | Texas - TX_1             | MAE= 1.84 (ZS  1.71) | WAPE= 32.1% | Bias= +0.92 | Cov80=92.9% | TotErr=  +25.7
+  FOODS_3_080 | Wisconsin - WI_1         | MAE= 3.59 (ZS  3.29) | WAPE= 31.3% | Bias= +0.70 | Cov80=67.9% | TotErr=  +19.5
+  FOODS_3_099 | California - CA_1        | MAE= 5.47 (ZS  4.86) | WAPE= 37.9% | Bias= +3.02 | Cov80=82.1% | TotErr=  +84.5
+  FOODS_3_099 | Texas - TX_1             | MAE= 2.96 (ZS  2.87) | WAPE= 30.0% | Bias= -1.28 | Cov80=82.1% | TotErr=  -35.7
+  FOODS_3_099 | Wisconsin - WI_1         | MAE= 2.52 (ZS  2.58) | WAPE= 28.9% | Bias= -1.07 | Cov80=89.3% | TotErr=  -30.0
+  FOODS_3_541 | California - CA_1        | MAE= 1.72 (ZS  1.69) | WAPE=4807.0% | Bias= +1.72 | Cov80=100.0% | TotErr=  +48.1
+  FOODS_3_541 | Texas - TX_1             | MAE= 3.83 (ZS  3.69) | WAPE=670.9% | Bias= +2.91 | Cov80=89.3% | TotErr=  +81.6
+  FOODS_3_541 | Wisconsin - WI_1         | MAE= 5.40 (ZS  4.90) | WAPE=5042.3% | Bias= +5.40 | Cov80= 7.1% | TotErr= +151.3
+  FOODS_3_555 | California - CA_1        | MAE= 3.12 (ZS  3.30) | WAPE= 16.3% | Bias= -1.30 | Cov80=85.7% | TotErr=  -36.3
+  FOODS_3_555 | Texas - TX_1             | MAE= 5.85 (ZS  5.28) | WAPE= 20.4% | Bias= -2.12 | Cov80=75.0% | TotErr=  -59.4
+  FOODS_3_555 | Wisconsin - WI_1         | MAE= 2.10 (ZS  2.04) | WAPE= 22.3% | Bias= -0.60 | Cov80=85.7% | TotErr=  -16.8
+  FOODS_3_587 | California - CA_1        | MAE=11.00 (ZS  8.82) | WAPE= 47.9% | Bias=+10.52 | Cov80=60.7% | TotErr= +294.5
+  FOODS_3_587 | Texas - TX_1             | MAE=10.64 (ZS 10.63) | WAPE= 45.6% | Bias= +9.75 | Cov80=50.0% | TotErr= +273.0
+  FOODS_3_587 | Wisconsin - WI_1         | MAE= 2.83 (ZS  2.74) | WAPE= 20.3% | Bias= -0.39 | Cov80=100.0% | TotErr=  -11.0
+  FOODS_3_635 | California - CA_1        | MAE= 1.71 (ZS  1.81) | WAPE=435.5% | Bias= +1.02 | Cov80=92.9% | TotErr=  +28.4
+  FOODS_3_635 | Texas - TX_1             | MAE= 3.45 (ZS  3.81) | WAPE=345.3% | Bias= +1.70 | Cov80=92.9% | TotErr=  +47.5
+  FOODS_3_635 | Wisconsin - WI_1         | MAE= 3.86 (ZS  3.56) | WAPE=720.9% | Bias= +3.72 | Cov80=14.3% | TotErr= +104.2
+  FOODS_3_681 | California - CA_1        | MAE= 4.42 (ZS  5.45) | WAPE= 23.2% | Bias= -2.46 | Cov80=92.9% | TotErr=  -68.8
+  FOODS_3_681 | Texas - TX_1             | MAE=23.17 (ZS  7.93) | WAPE= 54.0% | Bias=-23.17 | Cov80=21.4% | TotErr= -648.8
+  FOODS_3_681 | Wisconsin - WI_1         | MAE= 2.38 (ZS  2.42) | WAPE= 96.5% | Bias= +1.81 | Cov80=71.4% | TotErr=  +50.8
+  FOODS_3_741 | California - CA_1        | MAE= 5.28 (ZS  5.06) | WAPE= 31.9% | Bias= -0.32 | Cov80=89.3% | TotErr=   -9.0
+  FOODS_3_741 | Texas - TX_1             | MAE= 1.73 (ZS  1.82) | WAPE= 97.2% | Bias= -0.44 | Cov80=42.9% | TotErr=  -12.4
+  FOODS_3_741 | Wisconsin - WI_1         | MAE= 1.21 (ZS  1.22) | WAPE= 77.3% | Bias= -0.51 | Cov80=60.7% | TotErr=  -14.4
+  FOODS_3_808 | California - CA_1        | MAE= 5.99 (ZS  4.48) | WAPE=430.0% | Bias= +4.50 | Cov80=100.0% | TotErr= +126.0
+  FOODS_3_808 | Texas - TX_1             | MAE= 5.06 (ZS  6.44) | WAPE=2361.9% | Bias= +5.06 | Cov80=32.1% | TotErr= +141.7
+  FOODS_3_808 | Wisconsin - WI_1         | MAE= 4.55 (ZS  5.02) | WAPE=1414.7% | Bias= +4.52 | Cov80=10.7% | TotErr= +126.7
+  HOBBIES_1_008 | California - CA_1      | MAE= 7.20 (ZS  6.83) | WAPE= 88.4% | Bias= +0.12 | Cov80=75.0% | TotErr=   +3.3
+  HOBBIES_1_008 | Texas - TX_1           | MAE= 2.18 (ZS  2.26) | WAPE=103.3% | Bias= -0.14 | Cov80=53.6% | TotErr=   -4.0
+  HOBBIES_1_008 | Wisconsin - WI_1       | MAE= 2.74 (ZS  2.74) | WAPE= 73.7% | Bias= -0.70 | Cov80=57.1% | TotErr=  -19.6
+  HOBBIES_1_048 | California - CA_1      | MAE= 9.04 (ZS  8.97) | WAPE= 57.5% | Bias= -1.74 | Cov80=82.1% | TotErr=  -48.7
+  HOBBIES_1_048 | Texas - TX_1           | MAE= 3.28 (ZS  3.27) | WAPE=102.2% | Bias= +1.33 | Cov80=67.9% | TotErr=  +37.2
+  HOBBIES_1_048 | Wisconsin - WI_1       | MAE= 4.63 (ZS  4.85) | WAPE= 53.4% | Bias= -0.58 | Cov80=85.7% | TotErr=  -16.2
+  HOBBIES_1_254 | California - CA_1      | MAE= 4.73 (ZS  4.16) | WAPE= 61.1% | Bias= +1.77 | Cov80=78.6% | TotErr=  +49.5
+  HOBBIES_1_254 | Texas - TX_1           | MAE= 4.15 (ZS  4.32) | WAPE=127.8% | Bias= +1.05 | Cov80=60.7% | TotErr=  +29.5
+  HOBBIES_1_254 | Wisconsin - WI_1       | MAE= 2.60 (ZS  2.29) | WAPE= 94.6% | Bias= +0.28 | Cov80=67.9% | TotErr=   +7.8
+  HOBBIES_1_341 | California - CA_1      | MAE= 2.85 (ZS  3.14) | WAPE=102.3% | Bias= -0.04 | Cov80=57.1% | TotErr=   -1.0
+  HOBBIES_1_341 | Texas - TX_1           | MAE= 4.01 (ZS  3.90) | WAPE= 88.3% | Bias= -0.92 | Cov80=60.7% | TotErr=  -25.7
+  HOBBIES_1_341 | Wisconsin - WI_1       | MAE= 3.88 (ZS  3.50) | WAPE= 70.9% | Bias= -3.01 | Cov80=57.1% | TotErr=  -84.2
+  HOBBIES_1_370 | California - CA_1      | MAE= 3.05 (ZS  3.14) | WAPE= 64.7% | Bias= -1.13 | Cov80=75.0% | TotErr=  -31.6
+  HOBBIES_1_370 | Texas - TX_1           | MAE= 3.18 (ZS  2.98) | WAPE=102.3% | Bias= -0.15 | Cov80=57.1% | TotErr=   -4.3
+  HOBBIES_1_370 | Wisconsin - WI_1       | MAE= 3.11 (ZS  3.20) | WAPE= 51.5% | Bias= -0.89 | Cov80=78.6% | TotErr=  -24.9
+  HOUSEHOLD_1_303 | California - CA_1    | MAE= 4.08 (ZS  4.01) | WAPE= 65.6% | Bias= +0.31 | Cov80=67.9% | TotErr=   +8.6
+  HOUSEHOLD_1_303 | Texas - TX_1         | MAE= 5.30 (ZS  4.12) | WAPE=132.6% | Bias= +4.68 | Cov80=64.3% | TotErr= +131.0
+  HOUSEHOLD_1_303 | Wisconsin - WI_1     | MAE= 3.54 (ZS  3.39) | WAPE= 70.3% | Bias= +1.61 | Cov80=78.6% | TotErr=  +45.0
+  HOUSEHOLD_1_373 | California - CA_1    | MAE= 1.87 (ZS  2.14) | WAPE= 44.7% | Bias= -1.28 | Cov80=67.9% | TotErr=  -35.9
+  HOUSEHOLD_1_373 | Texas - TX_1         | MAE= 3.78 (ZS  3.91) | WAPE= 38.4% | Bias= +0.70 | Cov80=64.3% | TotErr=  +19.7
+  HOUSEHOLD_1_373 | Wisconsin - WI_1     | MAE= 0.67 (ZS  0.66) | WAPE=156.3% | Bias= +0.21 | Cov80=85.7% | TotErr=   +5.9
+  HOUSEHOLD_1_409 | California - CA_1    | MAE= 3.58 (ZS  4.03) | WAPE= 66.4% | Bias= +2.19 | Cov80=60.7% | TotErr=  +61.5
+  HOUSEHOLD_1_409 | Texas - TX_1         | MAE= 2.05 (ZS  2.44) | WAPE= 42.5% | Bias= -1.02 | Cov80=75.0% | TotErr=  -28.6
+  HOUSEHOLD_1_409 | Wisconsin - WI_1     | MAE= 2.02 (ZS  2.15) | WAPE= 37.1% | Bias= -0.58 | Cov80=82.1% | TotErr=  -16.2
+  HOUSEHOLD_1_418 | California - CA_1    | MAE= 5.46 (ZS  5.29) | WAPE= 36.4% | Bias= -3.74 | Cov80=60.7% | TotErr= -104.7
+  HOUSEHOLD_1_418 | Texas - TX_1         | MAE= 3.24 (ZS  3.31) | WAPE= 28.1% | Bias= -1.03 | Cov80=92.9% | TotErr=  -28.9
+  HOUSEHOLD_1_418 | Wisconsin - WI_1     | MAE= 2.73 (ZS  2.76) | WAPE= 47.5% | Bias= -0.78 | Cov80=85.7% | TotErr=  -22.0
+  HOUSEHOLD_1_447 | California - CA_1    | MAE= 3.19 (ZS  3.06) | WAPE= 36.0% | Bias= -0.86 | Cov80=82.1% | TotErr=  -24.0
+  HOUSEHOLD_1_447 | Texas - TX_1         | MAE= 3.70 (ZS  3.25) | WAPE= 70.0% | Bias= +3.21 | Cov80=82.1% | TotErr=  +89.8
+  HOUSEHOLD_1_447 | Wisconsin - WI_1     | MAE= 2.18 (ZS  2.27) | WAPE= 42.4% | Bias= -0.14 | Cov80=78.6% | TotErr=   -3.9
+  HOUSEHOLD_1_459 | California - CA_1    | MAE= 2.52 (ZS  2.48) | WAPE= 81.2% | Bias= +1.18 | Cov80=71.4% | TotErr=  +33.0
+  HOUSEHOLD_1_459 | Texas - TX_1         | MAE= 6.57 (ZS  6.21) | WAPE= 84.3% | Bias= +6.56 | Cov80=71.4% | TotErr= +183.8
+  HOUSEHOLD_1_459 | Wisconsin - WI_1     | MAE= 4.79 (ZS  5.49) | WAPE= 59.0% | Bias= +1.46 | Cov80=78.6% | TotErr=  +40.8
+  HOUSEHOLD_1_514 | California - CA_1    | MAE= 2.38 (ZS  2.48) | WAPE= 25.2% | Bias= -0.09 | Cov80=85.7% | TotErr=   -2.6
+  HOUSEHOLD_1_514 | Texas - TX_1         | MAE= 1.56 (ZS  1.76) | WAPE= 33.9% | Bias= -0.34 | Cov80=92.9% | TotErr=   -9.5
+  HOUSEHOLD_1_514 | Wisconsin - WI_1     | MAE= 1.08 (ZS  1.15) | WAPE= 70.3% | Bias= -0.32 | Cov80=50.0% | TotErr=   -9.0
+  HOUSEHOLD_1_517 | California - CA_1    | MAE= 4.27 (ZS  4.49) | WAPE= 60.1% | Bias= +1.35 | Cov80=60.7% | TotErr=  +37.8
+  HOUSEHOLD_1_517 | Texas - TX_1         | MAE= 3.92 (ZS  4.03) | WAPE= 49.7% | Bias= -2.27 | Cov80=67.9% | TotErr=  -63.5
+  HOUSEHOLD_1_517 | Wisconsin - WI_1     | MAE= 1.67 (ZS  1.71) | WAPE= 45.3% | Bias= -1.15 | Cov80=89.3% | TotErr=  -32.3
+  HOUSEHOLD_1_521 | California - CA_1    | MAE= 3.96 (ZS  4.11) | WAPE= 64.9% | Bias= +0.64 | Cov80=82.1% | TotErr=  +18.0
+  HOUSEHOLD_1_521 | Texas - TX_1         | MAE= 5.77 (ZS  5.78) | WAPE= 82.0% | Bias= +2.88 | Cov80=71.4% | TotErr=  +80.6
+  HOUSEHOLD_1_521 | Wisconsin - WI_1     | MAE= 3.45 (ZS  3.55) | WAPE= 69.4% | Bias= +1.45 | Cov80=78.6% | TotErr=  +40.6
