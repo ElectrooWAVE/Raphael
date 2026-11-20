@@ -4,10 +4,12 @@ PROJECT: Retail Product Demand Forecasting (Phase 1). Python, Streamlit, Plotly,
 Forecasting model: Amazon Chronos-2 (`amazon/chronos-2`) via the official `chronos-forecasting` package.
 
 ## Hard rules
-1. Every forecast shown anywhere must come from real inference by the official
-   amazon/chronos-2 model via `Chronos2Pipeline.predict_df`. NEVER add mock, random,
-   placeholder, hard-coded, moving-average or "fallback" forecasts, and never substitute
-   another model (Chronos-Bolt, T5, Prophet, ARIMA, etc.). If inference fails, show a clear error.
+1. Every Chronos-2 forecast must come from real inference by the official
+   `amazon/chronos-2` model via `Chronos2Pipeline.predict_df`. A separate custom model
+   engine (e.g., Custom Recursive LightGBM or Seasonal Baseline) is allowed only when
+   clearly labelled in the UI and stored with its own engine name. NEVER add mock,
+   random, placeholder, hard-coded, or silent "fallback" forecasts anywhere. If
+   inference fails, show a clear error.
 2. Do not edit `src/rdf/forecaster.py` without re-running `scripts/smoke_test.py`
    and reporting its real printed output.
 3. Never delete genuine zero-sales rows. A truly missing day is NaN, never 0.

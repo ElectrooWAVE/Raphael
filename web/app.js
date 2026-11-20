@@ -19,6 +19,17 @@ const state = {
   animToken: 0,
   rafId: 0,
   selectedFile: null,
+  historyQuery: {
+    seriesId: "",
+    modelType: "",
+    sort: "newest",
+    limit: 15,
+    offset: 0,
+    total: 0,
+  },
+  inspectedRun: null,
+  modalTriggerEl: null,
+  pendingDeleteRunId: null,
 };
 
 const COLORS = {
@@ -106,8 +117,19 @@ const api = {
     }),
   getOverview: () => apiFetch("/api/overview"),
   getDatasets: () => apiFetch("/api/datasets"),
-  getHistoryRuns: () => apiFetch("/api/history/runs"),
-  getRunDetails: (runId) => apiFetch(`/api/history/runs/${runId}`),
+  getHistoryRuns: (params = {}) => {
+    const q = new URLSearchParams();
+    q.set("paginated", "true");
+    q.set("limit", String(params.limit ?? 15));
+    q.set("offset", String(params.offset ?? 0));
+    q.set("sort", params.sort || "newest");
+    if (params.seriesId) q.set("series_id", params.seriesId);
+    if (params.modelType) q.set("model_type", params.modelType);
+    return apiFetch(`/api/history/runs?${q.toString()}`);
+  },
+  getRunDetails: (runId) => apiFetch(`/api/history/runs/${encodeURIComponent(runId)}`),
+  deleteRun: (runId) => apiFetch(`/api/history/runs/${encodeURIComponent(runId)}`, { method: "DELETE" }),
+  rerunForecast: (runId) => apiFetch(`/api/history/runs/${encodeURIComponent(runId)}/rerun`, { method: "POST" }),
   getModels: (datasetId) => apiFetch(datasetId ? `/api/models?dataset_id=${encodeURIComponent(datasetId)}` : "/api/models"),
   postTrainModel: (payload) =>
     apiFetch("/api/models/train", {
@@ -1003,71 +1025,517 @@ async function handleImportSubmit(e) {
   }
 }
 
-// --- Forecast History Controller ---
+// --- Forecast History & Run Inspector Controller ---
 
-async function loadHistoryView() {
-  try {
-    const runs = await api.getHistoryRuns();
-    const tbody = el("hist-runs-tbody");
-    tbody.innerHTML = "";
-    if (runs.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="8" class="muted-cell">No archived runs found.</td></tr>`;
-      return;
+function populateHistorySeriesFilter() {
+  const select = el("hist-filter-series");
+  if (!select) return;
+  const allSeries = [];
+  for (const [product, stores] of state.seriesByProduct.entries()) {
+    for (const store of stores) {
+      allSeries.push(`${product} | ${store}`);
     }
-    runs.forEach((r) => {
-      const tr = document.createElement("tr");
-      const modelDisp = r.model_type === "custom" || r.model_type === "lightgbm" ? "Custom Model" : r.model_type.toUpperCase();
-      tr.innerHTML = `
-        <td><code>${r.id}</code></td>
-        <td><strong>${modelDisp}</strong></td>
-        <td><small>${r.model_id}</small></td>
-        <td>${r.series_id}</td>
-        <td class="num">${r.horizon}</td>
-        <td class="num">${r.execution_time_sec !== undefined ? r.execution_time_sec + "s" : "-"}</td>
-        <td>${new Date(r.created_at).toLocaleDateString()}</td>
-        <td><button type="button" class="btn-secondary" data-inspect-run="${r.id}">Inspect</button></td>
-      `;
-      tbody.appendChild(tr);
-    });
+  }
+  allSeries.sort();
+  const prev = state.historyQuery.seriesId;
+  select.textContent = "";
+  select.appendChild(new Option("All series", ""));
+  for (const sid of allSeries) {
+    select.appendChild(new Option(sid, sid));
+  }
+  select.value = allSeries.includes(prev) ? prev : "";
+}
 
-    tbody.querySelectorAll("[data-inspect-run]").forEach((b) => {
-      b.onclick = () => inspectRun(b.dataset.inspectRun);
-    });
-  } catch (err) {
-    showAlert(err.message);
+function formatDateTime(iso) {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  return d.toLocaleString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function showHistoryError(msg) {
+  const banner = el("hist-error-banner");
+  if (!banner) return;
+  if (msg) {
+    banner.textContent = msg;
+    banner.hidden = false;
+  } else {
+    banner.textContent = "";
+    banner.hidden = true;
   }
 }
 
-async function inspectRun(runId) {
+function hideHistoryDeleteConfirm() {
+  state.pendingDeleteRunId = null;
+  const box = el("hist-delete-confirm");
+  if (box) box.hidden = true;
+}
+
+function requestHistoryRowDelete(runId) {
+  state.pendingDeleteRunId = runId;
+  el("hist-delete-msg").textContent = `Delete forecast run ${runId}? This removes its stored values permanently.`;
+  el("hist-delete-confirm").hidden = false;
+}
+
+async function loadHistoryView() {
+  populateHistorySeriesFilter();
+  showHistoryError("");
+  const tbody = el("hist-runs-tbody");
+  tbody.textContent = "";
+  const loadTr = document.createElement("tr");
+  const loadTd = document.createElement("td");
+  loadTd.colSpan = 9;
+  loadTd.className = "muted-cell";
+  loadTd.textContent = "Loading historical runs...";
+  loadTr.appendChild(loadTd);
+  tbody.appendChild(loadTr);
+
+  try {
+    const q = state.historyQuery;
+    const data = await api.getHistoryRuns(q);
+    const runs = Array.isArray(data) ? data : data.items || [];
+    const total = Array.isArray(data) ? runs.length : Number(data.total || 0);
+    q.total = total;
+
+    if (runs.length === 0 && q.offset > 0) {
+      q.offset = Math.max(0, q.offset - q.limit);
+      return loadHistoryView();
+    }
+
+    el("hist-total-badge").textContent = `${intFmt.format(total)} run${total === 1 ? "" : "s"}`;
+    const startIdx = total === 0 ? 0 : q.offset + 1;
+    const endIdx = Math.min(total, q.offset + runs.length);
+    el("hist-page-info").textContent = `Showing ${startIdx}-${endIdx} of ${intFmt.format(total)}`;
+    el("hist-prev-btn").disabled = q.offset <= 0;
+    el("hist-next-btn").disabled = q.offset + q.limit >= total;
+
+    tbody.textContent = "";
+    if (runs.length === 0) {
+      const emptyTr = document.createElement("tr");
+      const emptyTd = document.createElement("td");
+      emptyTd.colSpan = 9;
+      emptyTd.className = "muted-cell";
+      emptyTd.textContent = "No forecast runs match the current filters.";
+      emptyTr.appendChild(emptyTd);
+      tbody.appendChild(emptyTr);
+      return;
+    }
+
+    for (const r of runs) {
+      const tr = document.createElement("tr");
+      const engineText = r.engine_label || (r.model_type === "lightgbm" || r.model_type === "custom" ? "Custom (LightGBM)" : String(r.model_type || "").toUpperCase());
+
+      const tdId = document.createElement("td");
+      const code = document.createElement("code");
+      code.textContent = r.id;
+      tdId.appendChild(code);
+      tr.appendChild(tdId);
+
+      const tdEng = document.createElement("td");
+      const strong = document.createElement("strong");
+      strong.textContent = engineText;
+      tdEng.appendChild(strong);
+      tr.appendChild(tdEng);
+
+      const tdMod = document.createElement("td");
+      tdMod.textContent = r.model_id || "-";
+      tr.appendChild(tdMod);
+
+      const tdSeries = document.createElement("td");
+      tdSeries.textContent = r.series_id || "-";
+      tr.appendChild(tdSeries);
+
+      const tdHorizon = document.createElement("td");
+      tdHorizon.className = "num";
+      tdHorizon.textContent = `${r.horizon}d`;
+      tr.appendChild(tdHorizon);
+
+      const tdDev = document.createElement("td");
+      tdDev.textContent = String(r.device || "-").toUpperCase();
+      tr.appendChild(tdDev);
+
+      const tdExec = document.createElement("td");
+      tdExec.className = "num";
+      tdExec.textContent = r.execution_time_sec !== null && r.execution_time_sec !== undefined ? `${r.execution_time_sec}s` : "-";
+      tr.appendChild(tdExec);
+
+      const tdCreated = document.createElement("td");
+      tdCreated.textContent = formatDateTime(r.created_at);
+      tr.appendChild(tdCreated);
+
+      const tdAction = document.createElement("td");
+      const actionBox = document.createElement("div");
+      actionBox.className = "history-actions";
+
+      const inspectBtn = document.createElement("button");
+      inspectBtn.type = "button";
+      inspectBtn.className = "btn-secondary";
+      inspectBtn.textContent = "Inspect";
+      inspectBtn.addEventListener("click", () => inspectRun(r.id, inspectBtn));
+
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "btn-danger-outline";
+      delBtn.textContent = "Delete";
+      delBtn.addEventListener("click", () => requestHistoryRowDelete(r.id));
+
+      actionBox.appendChild(inspectBtn);
+      actionBox.appendChild(delBtn);
+      tdAction.appendChild(actionBox);
+      tr.appendChild(tdAction);
+
+      tbody.appendChild(tr);
+    }
+  } catch (err) {
+    tbody.textContent = "";
+    const errTr = document.createElement("tr");
+    const errTd = document.createElement("td");
+    errTd.colSpan = 9;
+    errTd.className = "muted-cell";
+    errTd.textContent = "Could not load forecast runs.";
+    errTr.appendChild(errTd);
+    tbody.appendChild(errTr);
+    showHistoryError(err.message);
+  }
+}
+
+function appendDlItem(container, term, val) {
+  const wrap = document.createElement("div");
+  wrap.className = container.id === "modal-meta-grid" ? "modal-meta-item" : "";
+  const dt = document.createElement("dt");
+  dt.textContent = term;
+  const dd = document.createElement("dd");
+  dd.textContent = val;
+  wrap.appendChild(dt);
+  wrap.appendChild(dd);
+  container.appendChild(wrap);
+}
+
+function renderModalChart(run) {
+  const chartEl = el("modal-chart");
+  const emptyEl = el("modal-empty");
+  const values = Array.isArray(run.values) ? run.values : [];
+
+  if (values.length === 0) {
+    emptyEl.hidden = false;
+    chartEl.hidden = true;
+    if (typeof Plotly !== "undefined") Plotly.purge(chartEl);
+    return;
+  }
+
+  emptyEl.hidden = true;
+  chartEl.hidden = false;
+  if (typeof Plotly === "undefined") return;
+
+  const dates = values.map((v) => v.timestamp);
+  const median = values.map((v) => v.predicted_median);
+  const expected = values.map((v) => (v.expected !== null && v.expected !== undefined ? v.expected : v.predicted_median));
+  const q10 = values.map((v) => v.lower_bound);
+  const q90 = values.map((v) => v.upper_bound);
+
+  const traces = [];
+  const tail = run.history_tail || { dates: [], sales: [] };
+  if (Array.isArray(tail.dates) && tail.dates.length > 0) {
+    traces.push({
+      x: tail.dates,
+      y: tail.sales,
+      type: "scatter",
+      mode: "lines",
+      name: "Historical sales",
+      line: { color: COLORS.primary, width: 1.6 },
+      hovertemplate: "Historical sales: %{y:,.1f} units<extra></extra>",
+    });
+  }
+
+  traces.push(
+    {
+      x: dates,
+      y: q90,
+      type: "scatter",
+      mode: "lines",
+      line: { color: "transparent", width: 0 },
+      showlegend: false,
+      hoverinfo: "skip",
+    },
+    {
+      x: dates,
+      y: q10,
+      type: "scatter",
+      mode: "lines",
+      fill: "tonexty",
+      fillcolor: COLORS.intervalFill,
+      line: { color: "transparent", width: 0 },
+      name: "80% prediction interval",
+      hovertemplate: "80% interval: %{y:,.1f} - %{customdata:,.1f} units<extra></extra>",
+      customdata: q90,
+    },
+    {
+      x: dates,
+      y: median,
+      type: "scatter",
+      mode: "lines+markers",
+      name: "Predicted demand (median)",
+      line: { color: COLORS.custom, width: 2.3 },
+      marker: { size: 4 },
+      hovertemplate: "Median: %{y:,.1f} units<extra></extra>",
+    },
+    {
+      x: dates,
+      y: expected,
+      type: "scatter",
+      mode: "lines",
+      name: "Expected demand",
+      line: { color: COLORS.actual, width: 1.8, dash: "dot" },
+      hovertemplate: "Expected: %{y:,.1f} units<extra></extra>",
+    }
+  );
+
+  const layout = {
+    paper_bgcolor: "rgba(0,0,0,0)",
+    plot_bgcolor: COLORS.plotBg,
+    margin: { l: 58, r: 16, t: 44, b: 34 },
+    height: 380,
+    hovermode: "x unified",
+    hoverlabel: {
+      bgcolor: "#FFFFFF",
+      bordercolor: COLORS.border,
+      font: { family: "Inter, system-ui, sans-serif", size: 13, color: COLORS.text },
+    },
+    legend: { orientation: "h", x: 0, y: 1.14, font: { size: 12, color: COLORS.text } },
+    font: { family: "Inter, system-ui, sans-serif", size: 12, color: COLORS.text },
+    xaxis: {
+      type: "date",
+      gridcolor: COLORS.grid,
+      showspikes: false,
+      hoverformat: "%a, %d %b %Y",
+      tickfont: { color: COLORS.tick, size: 12 },
+    },
+    yaxis: {
+      gridcolor: COLORS.grid,
+      title: { text: "Units sold", font: { size: 13, color: COLORS.text } },
+      tickfont: { color: COLORS.tick, size: 12 },
+      tickformat: ",.0f",
+      rangemode: "tozero",
+    },
+    shapes: [
+      {
+        type: "line",
+        x0: dates[0],
+        x1: dates[0],
+        y0: 0,
+        y1: 1,
+        yref: "paper",
+        line: { color: COLORS.tick, width: 1.1, dash: "dash" },
+      },
+    ],
+    annotations: [
+      {
+        x: dates[0],
+        y: 1,
+        yref: "paper",
+        text: "Forecast start",
+        showarrow: false,
+        xanchor: "left",
+        yanchor: "bottom",
+        xshift: 4,
+        font: { size: 11, color: COLORS.tick },
+      },
+    ],
+  };
+
+  Plotly.react(chartEl, traces, layout, { responsive: true, displaylogo: false });
+}
+
+function renderModalValuesTable(run) {
+  const tbody = el("modal-values-tbody");
+  tbody.textContent = "";
+  const values = Array.isArray(run.values) ? run.values : [];
+  if (values.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 5;
+    td.className = "muted-cell";
+    td.textContent = "No stored daily rows.";
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+
+  for (const v of values) {
+    const tr = document.createElement("tr");
+    const expVal = v.expected !== null && v.expected !== undefined ? v.expected : v.predicted_median;
+    const cells = [
+      { text: formatDate(v.timestamp), cls: "" },
+      { text: v.predicted_median !== null && v.predicted_median !== undefined ? dec1Fmt.format(v.predicted_median) : "-", cls: "num" },
+      { text: expVal !== null && expVal !== undefined ? dec1Fmt.format(expVal) : "-", cls: "num" },
+      { text: v.lower_bound !== null && v.lower_bound !== undefined ? dec1Fmt.format(v.lower_bound) : "-", cls: "num" },
+      { text: v.upper_bound !== null && v.upper_bound !== undefined ? dec1Fmt.format(v.upper_bound) : "-", cls: "num" },
+    ];
+    for (const c of cells) {
+      const td = document.createElement("td");
+      if (c.cls) td.className = c.cls;
+      td.textContent = c.text;
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+}
+
+function renderInspectedRun(run) {
+  state.inspectedRun = run;
+  el("modal-run-title").textContent = `Forecast Run Inspection: ${run.id}`;
+
+  const metaGrid = el("modal-meta-grid");
+  metaGrid.textContent = "";
+  appendDlItem(metaGrid, "Run ID", run.id || "-");
+  appendDlItem(metaGrid, "Engine", run.engine_label || run.model_type || "-");
+  appendDlItem(metaGrid, "Model ID", run.model_id || "-");
+  appendDlItem(metaGrid, "Series", run.series_id || "-");
+  appendDlItem(metaGrid, "Horizon", `${run.horizon} days`);
+  appendDlItem(metaGrid, "Device", String(run.device || "-").toUpperCase());
+  appendDlItem(metaGrid, "Execution Time", run.execution_time_sec !== null && run.execution_time_sec !== undefined ? `${run.execution_time_sec}s` : "-");
+  appendDlItem(metaGrid, "Created At", formatDateTime(run.created_at));
+
+  const reproGrid = el("modal-repro-grid");
+  reproGrid.textContent = "";
+  const r = run.reproducibility || {};
+  const pkgs = r.packages || {};
+  const pkgStr = Object.entries(pkgs).map(([k, v]) => `${k}=${v}`).join(", ") || "-";
+  const params = r.parameters || {};
+  const ctxStr = params.context_length === null || params.context_length === undefined ? "model default" : String(params.context_length);
+  const qStr = Array.isArray(params.quantile_levels) ? params.quantile_levels.join(", ") : "-";
+
+  appendDlItem(reproGrid, "Model ID / Engine", `${r.model_id || run.model_id || "-"} (${r.engine || run.engine_label || "-"})`);
+  appendDlItem(reproGrid, "Package Versions", pkgStr);
+  appendDlItem(reproGrid, "Data File", r.data_file || "-");
+  appendDlItem(reproGrid, "Data SHA-256", r.data_sha256 ? `${r.data_sha256.slice(0, 16)}...` : "-");
+  appendDlItem(reproGrid, "Parameters", `context_length=${ctxStr}; quantiles=[${qStr}]`);
+  appendDlItem(reproGrid, "Post-processing", r.post_processing || "Clip negative values at 0");
+
+  el("modal-download-btn").disabled = !Array.isArray(run.values) || run.values.length === 0;
+  el("modal-delete-confirm").hidden = true;
+  el("modal-notice").textContent = "";
+
+  renderModalChart(run);
+  renderModalValuesTable(run);
+}
+
+async function inspectRun(runId, triggerEl = null) {
+  state.modalTriggerEl = triggerEl || document.activeElement;
+  state.inspectedRun = null;
+
+  const modal = el("hist-modal");
+  const body = el("modal-body");
+  el("modal-run-title").textContent = `Forecast Run Inspection: ${runId}`;
+  el("modal-loading").hidden = false;
+  el("modal-error").hidden = true;
+  el("modal-error").textContent = "";
+  el("modal-content").hidden = true;
+  modal.hidden = false;
+  body.setAttribute("aria-busy", "true");
+  el("modal-close-btn").focus();
+
   try {
     const run = await api.getRunDetails(runId);
-    el("modal-run-title").textContent = `Forecast Run: ${run.id} (${run.model_type.toUpperCase()})`;
-    el("hist-modal").hidden = false;
-
-    const dates = run.values.map((v) => v.timestamp);
-    const median = run.values.map((v) => v.predicted_median);
-    const q10 = run.values.map((v) => v.lower_bound);
-    const q90 = run.values.map((v) => v.upper_bound);
-
-    const traces = [
-      { x: dates, y: q90, type: "scatter", mode: "lines", line: { color: "transparent" }, showlegend: false },
-      { x: dates, y: q10, type: "scatter", mode: "lines", fill: "tonexty", fillcolor: COLORS.intervalFill, line: { color: "transparent" }, name: "80% Interval" },
-      { x: dates, y: median, type: "scatter", mode: "lines+markers", name: "Predicted Demand", line: { color: COLORS.custom, width: 2.2 } },
-    ];
-
-    const layout = {
-      paper_bgcolor: "rgba(0,0,0,0)",
-      plot_bgcolor: COLORS.plotBg,
-      margin: { l: 50, r: 16, t: 20, b: 36 },
-      height: 420,
-      font: { family: "Inter, sans-serif", size: 12 },
-      xaxis: { gridcolor: COLORS.grid },
-      yaxis: { gridcolor: COLORS.grid, title: "Units" },
-    };
-
-    Plotly.react("modal-chart", traces, layout, { responsive: true, displaylogo: false });
+    el("modal-loading").hidden = true;
+    el("modal-content").hidden = false;
+    renderInspectedRun(run);
   } catch (err) {
-    showAlert(err.message);
+    el("modal-loading").hidden = true;
+    el("modal-error").textContent = `Failed to load run '${runId}': ${err.message}`;
+    el("modal-error").hidden = false;
+  } finally {
+    body.setAttribute("aria-busy", "false");
+  }
+}
+
+function closeInspectModal() {
+  const modal = el("hist-modal");
+  if (!modal || modal.hidden) return;
+  modal.hidden = true;
+  el("modal-delete-confirm").hidden = true;
+  el("modal-notice").textContent = "";
+  if (typeof Plotly !== "undefined") {
+    Plotly.purge(el("modal-chart"));
+  }
+  const trigger = state.modalTriggerEl;
+  state.modalTriggerEl = null;
+  if (trigger && typeof trigger.focus === "function" && document.contains(trigger)) {
+    trigger.focus();
+  }
+}
+
+function downloadInspectedRunCsv() {
+  const run = state.inspectedRun;
+  if (!run || !Array.isArray(run.values) || run.values.length === 0) return;
+  const lines = ["date,median,expected,q10,q90"];
+  for (const v of run.values) {
+    const expVal = v.expected !== null && v.expected !== undefined ? v.expected : v.predicted_median;
+    lines.push(
+      `${v.timestamp},${Number(v.predicted_median ?? 0).toFixed(2)},${Number(expVal ?? 0).toFixed(2)},` +
+      `${Number(v.lower_bound ?? 0).toFixed(2)},${Number(v.upper_bound ?? 0).toFixed(2)}`
+    );
+  }
+  const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `run_${run.id}_${run.series_id}_${run.horizon}d.csv`.replace(/[^a-zA-Z0-9._-]+/g, "_");
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function handleModalRerun() {
+  const run = state.inspectedRun;
+  if (!run) return;
+  const btn = el("modal-rerun-btn");
+  const spinner = el("modal-rerun-spinner");
+  const label = el("modal-rerun-label");
+  btn.disabled = true;
+  spinner.hidden = false;
+  label.textContent = "Re-running...";
+  el("modal-notice").textContent = "";
+
+  try {
+    const newRun = await api.rerunForecast(run.id);
+    await loadHistoryView();
+    await inspectRun(newRun.run_id, state.modalTriggerEl);
+    el("modal-notice").textContent = `Created new run ${newRun.run_id} (original ${run.id} preserved).`;
+  } catch (err) {
+    el("modal-error").textContent = `Re-run failed: ${err.message}`;
+    el("modal-error").hidden = false;
+  } finally {
+    btn.disabled = false;
+    spinner.hidden = true;
+    label.textContent = "Re-run with same settings";
+  }
+}
+
+async function executeDeleteRun(runId, fromModal = false) {
+  try {
+    await api.deleteRun(runId);
+    if (fromModal) {
+      closeInspectModal();
+    } else {
+      hideHistoryDeleteConfirm();
+    }
+    await loadHistoryView();
+    showAlert(`Deleted forecast run ${runId}.`, "success");
+  } catch (err) {
+    if (fromModal) {
+      el("modal-error").textContent = `Delete failed: ${err.message}`;
+      el("modal-error").hidden = false;
+    } else {
+      showHistoryError(`Delete failed: ${err.message}`);
+    }
   }
 }
 
@@ -1397,9 +1865,55 @@ function setupEvents() {
   });
   el("cmp-run-btn").addEventListener("click", handleRunComparison);
 
-  // Modal events
-  el("modal-close-btn").addEventListener("click", () => {
-    el("hist-modal").hidden = true;
+  // History toolbar, pagination & modal events
+  el("hist-filter-series").addEventListener("change", (e) => {
+    state.historyQuery.seriesId = e.target.value;
+    state.historyQuery.offset = 0;
+    loadHistoryView();
+  });
+  el("hist-filter-engine").addEventListener("change", (e) => {
+    state.historyQuery.modelType = e.target.value;
+    state.historyQuery.offset = 0;
+    loadHistoryView();
+  });
+  el("hist-sort-select").addEventListener("change", (e) => {
+    state.historyQuery.sort = e.target.value;
+    state.historyQuery.offset = 0;
+    loadHistoryView();
+  });
+  el("hist-refresh-btn").addEventListener("click", loadHistoryView);
+  el("hist-prev-btn").addEventListener("click", () => {
+    state.historyQuery.offset = Math.max(0, state.historyQuery.offset - state.historyQuery.limit);
+    loadHistoryView();
+  });
+  el("hist-next-btn").addEventListener("click", () => {
+    state.historyQuery.offset += state.historyQuery.limit;
+    loadHistoryView();
+  });
+  el("hist-delete-yes").addEventListener("click", () => {
+    if (state.pendingDeleteRunId) executeDeleteRun(state.pendingDeleteRunId, false);
+  });
+  el("hist-delete-no").addEventListener("click", hideHistoryDeleteConfirm);
+
+  el("modal-close-btn").addEventListener("click", closeInspectModal);
+  el("hist-modal").addEventListener("click", (e) => {
+    if (e.target === el("hist-modal")) closeInspectModal();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !el("hist-modal").hidden) {
+      closeInspectModal();
+    }
+  });
+  el("modal-download-btn").addEventListener("click", downloadInspectedRunCsv);
+  el("modal-rerun-btn").addEventListener("click", handleModalRerun);
+  el("modal-delete-btn").addEventListener("click", () => {
+    el("modal-delete-confirm").hidden = false;
+  });
+  el("modal-delete-no").addEventListener("click", () => {
+    el("modal-delete-confirm").hidden = true;
+  });
+  el("modal-delete-yes").addEventListener("click", () => {
+    if (state.inspectedRun) executeDeleteRun(state.inspectedRun.id, true);
   });
 
   window.addEventListener("resize", () => moveHorizonHighlight(true));

@@ -49,6 +49,8 @@ from rdf.db import get_db, init_db, now_iso
 from rdf.evaluation import compute_metrics, generate_backtest_cutoffs
 from rdf.forecast_service import (
     compare_models,
+    count_forecast_runs,
+    delete_forecast_run,
     generate_single_forecast,
     get_forecast_run_details,
     list_forecast_runs,
@@ -466,19 +468,92 @@ def api_backtest(req: BacktestRequest) -> dict[str, Any]:
 def api_list_runs(
     dataset_id: Optional[str] = Query(None),
     series_id: Optional[str] = Query(None),
+    model_type: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200),
-) -> list[dict[str, Any]]:
+    offset: int = Query(0, ge=0),
+    sort: str = Query("newest"),
+    paginated: bool = Query(False),
+) -> Any:
     """Query past forecast runs."""
-    return list_forecast_runs(dataset_id=dataset_id, series_id=series_id, limit=limit)
+    if sort not in ("newest", "oldest"):
+        raise HTTPException(status_code=400, detail="sort must be 'newest' or 'oldest'.")
+    items = list_forecast_runs(
+        dataset_id=dataset_id,
+        series_id=series_id,
+        model_type=model_type,
+        limit=limit,
+        offset=offset,
+        sort=sort,
+    )
+    if not paginated:
+        return items
+    total = count_forecast_runs(dataset_id=dataset_id, series_id=series_id, model_type=model_type)
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
 @app.get("/api/history/runs/{run_id}")
 def api_run_details(run_id: str) -> dict[str, Any]:
     """Retrieve full details of a specific forecast run."""
-    run = get_forecast_run_details(run_id)
+    sales_df = getattr(app.state, "sales", None)
+    run = get_forecast_run_details(run_id, sales_df=sales_df)
     if not run:
         raise HTTPException(status_code=404, detail=f"Forecast run '{run_id}' not found.")
     return run
+
+
+@app.delete("/api/history/runs/{run_id}")
+def api_delete_run(run_id: str) -> dict[str, Any]:
+    """Delete a stored forecast run."""
+    if not delete_forecast_run(run_id):
+        raise HTTPException(status_code=404, detail=f"Forecast run '{run_id}' not found.")
+    return {"deleted": True, "run_id": run_id}
+
+
+@app.post("/api/history/runs/{run_id}/rerun")
+def api_rerun_forecast(run_id: str) -> dict[str, Any]:
+    """Re-run a historical forecast with the same settings, creating a new run."""
+    original = get_forecast_run_details(run_id, history_tail_days=0)
+    if not original:
+        raise HTTPException(status_code=404, detail=f"Forecast run '{run_id}' not found.")
+
+    dataset_id = original.get("dataset_id") or app.state.default_dataset_id or "retail-demand-m5"
+    series_id = original["series_id"]
+    horizon = int(original["horizon"])
+    model_type = (original.get("model_type") or "chronos").lower().strip()
+
+    try:
+        if dataset_id and dataset_id != "default":
+            history = get_series_history(dataset_id, series_id)
+        else:
+            history = get_series_legacy(app.state.sales, series_id)
+    except Exception:
+        try:
+            history = get_series_legacy(app.state.sales, series_id)
+        except Exception as e:
+            raise HTTPException(status_code=404, detail=f"Unknown series: {series_id}") from e
+
+    if model_type == "chronos" and app.state.pipeline is None:
+        raise HTTPException(status_code=500, detail=app.state.load_error or "Chronos-2 model failed to load.")
+
+    chronos_tuple = (app.state.pipeline, app.state.device) if app.state.pipeline else None
+    stored_model_id = original.get("model_id")
+    model_id_arg = stored_model_id if (model_type == "lightgbm" and stored_model_id and stored_model_id != "Custom Model") else None
+
+    try:
+        new_run = generate_single_forecast(
+            history_df=history,
+            horizon=horizon,
+            model_type=model_type,
+            model_id=model_id_arg,
+            series_id=series_id,
+            dataset_id=dataset_id,
+            version_id=original.get("version_id") or "v1",
+            chronos_pipeline_tuple=chronos_tuple,
+        )
+        new_run["rerun_of"] = run_id
+        return new_run
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # --- Overview & Statistics Endpoint ---

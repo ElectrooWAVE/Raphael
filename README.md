@@ -8,11 +8,13 @@ Web dashboard and FastAPI backend for retail demand forecasting using the offici
 - **Interactive Chart (`plotly-2.35.2.min.js`):** Historical sales (`#1F4E79`), Chronos-2 median forecast (`#C2571A`), 80% prediction interval, `1M / 3M / 6M / 1Y / All` zoom buttons, thin range slider, adaptive date ticks, and unified hover tooltips (`1 decimal`, `units`).
 - **Animations (`motion@11.13.5`):** Left-to-right forecast line reveal (`requestAnimationFrame` + `Plotly.restyle`), interval fade-in, KPI number count-up, sliding horizon highlight, and staggered panel entrance—all skipped automatically under `prefers-reduced-motion`.
 - **Data & Export:** Collapsible `Forecast data` table (`Date`, `Median`, `Expected`, `Low (10th)`, `High (90th)`) with client-side **Download CSV**.
+- **Forecasting History & Run Inspector:** Filter runs by series or engine (`Chronos-2`, `Custom (LightGBM)`, `Baseline`), sort newest/oldest, paginate, delete runs with confirmation, and click **Inspect** to view run metadata, reproducibility info (package versions, dataset SHA-256, parameters), stored forecast chart + table, CSV download, and **Re-run with same settings** (creates a new run).
 
 ## Windows Setup & Run Commands
 ```powershell
 cd E:\projects\Raphael
 .venv\Scripts\python.exe -m pytest -q
+.venv\Scripts\python.exe -m pytest tests/test_history_api.py -q
 .venv\Scripts\python.exe scripts/smoke_test.py
 .venv\Scripts\python.exe -m uvicorn server.main:app
 ```

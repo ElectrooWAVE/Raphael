@@ -7,9 +7,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=4">
+  <link rel="stylesheet" href="style.css?v=5">
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" defer></script>
-  <script type="module" src="app.js?v=4"></script>
+  <script type="module" src="app.js?v=5"></script>
 </head>
 <body>
   <div class="page">
@@ -748,10 +748,59 @@
 
       <!-- ================= 5. FORECASTING HISTORY VIEW ================= -->
       <section id="view-history" class="view-panel">
-        <section class="panel">
+        <section class="panel history-panel">
           <div class="chart-header">
             <h3 class="section-label">Historical Forecast Experiments Audit Log</h3>
+            <span id="hist-total-badge" class="pill">0 runs</span>
           </div>
+
+          <div class="history-toolbar">
+            <div class="field">
+              <label for="hist-filter-series" class="section-label">Filter by Series</label>
+              <div class="select-wrap">
+                <select id="hist-filter-series">
+                  <option value="">All series</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="hist-filter-engine" class="section-label">Filter by Engine</label>
+              <div class="select-wrap">
+                <select id="hist-filter-engine">
+                  <option value="">All engines</option>
+                  <option value="chronos">Chronos-2</option>
+                  <option value="lightgbm">Custom (LightGBM)</option>
+                  <option value="baseline">Baseline (Seasonal-Naive)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="hist-sort-select" class="section-label">Sort Order</label>
+              <div class="select-wrap">
+                <select id="hist-sort-select">
+                  <option value="newest" selected>Newest first</option>
+                  <option value="oldest">Oldest first</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="field field-action">
+              <button type="button" id="hist-refresh-btn" class="btn-secondary">Refresh</button>
+            </div>
+          </div>
+
+          <div id="hist-error-banner" class="error-banner" role="alert" hidden></div>
+
+          <div id="hist-delete-confirm" class="confirm-strip" role="alert" hidden>
+            <span id="hist-delete-msg">Delete this forecast run?</span>
+            <div class="confirm-strip-actions">
+              <button type="button" id="hist-delete-yes" class="btn-danger">Confirm Delete</button>
+              <button type="button" id="hist-delete-no" class="btn-secondary">Cancel</button>
+            </div>
+          </div>
+
           <div class="table-wrap">
             <table>
               <thead>
@@ -761,27 +810,89 @@
                   <th>Model ID</th>
                   <th>Series</th>
                   <th class="num">Horizon</th>
+                  <th>Device</th>
                   <th class="num">Execution Time</th>
                   <th>Created At</th>
-                  <th>Action</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody id="hist-runs-tbody">
-                <tr><td colspan="8" class="muted-cell">Loading historical runs...</td></tr>
+                <tr><td colspan="9" class="muted-cell">Loading historical runs...</td></tr>
               </tbody>
             </table>
+          </div>
+
+          <div class="history-pagination">
+            <span id="hist-page-info" class="page-info">Showing 0 of 0</span>
+            <div class="history-actions">
+              <button type="button" id="hist-prev-btn" class="btn-secondary" disabled>Previous</button>
+              <button type="button" id="hist-next-btn" class="btn-secondary" disabled>Next</button>
+            </div>
           </div>
         </section>
 
         <!-- Modal Dialog for Inspecting Past Run -->
-        <div id="hist-modal" class="modal-backdrop" hidden>
+        <div id="hist-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modal-run-title" hidden>
           <div class="modal-box panel">
             <div class="modal-header">
               <h3 id="modal-run-title" class="section-label">Forecast Run Inspection</h3>
-              <button type="button" id="modal-close-btn" class="btn-close">&times;</button>
+              <button type="button" id="modal-close-btn" class="btn-close" aria-label="Close forecast inspection">&times;</button>
             </div>
-            <div class="modal-body">
-              <div id="modal-chart" class="chart-container-modal"></div>
+            <div id="modal-body" class="modal-body" aria-live="polite">
+              <div id="modal-loading" class="modal-loading" hidden>
+                <span class="spinner spinner-dark" aria-hidden="true"></span>
+                <span>Loading forecast run details...</span>
+              </div>
+
+              <div id="modal-error" class="error-banner" role="alert" hidden></div>
+
+              <div id="modal-content" class="modal-content" hidden>
+                <div class="modal-actions">
+                  <button type="button" id="modal-download-btn" class="btn-secondary">Download CSV</button>
+                  <button type="button" id="modal-rerun-btn" class="btn-primary">
+                    <span id="modal-rerun-spinner" class="spinner" aria-hidden="true" hidden></span>
+                    <span id="modal-rerun-label">Re-run with same settings</span>
+                  </button>
+                  <button type="button" id="modal-delete-btn" class="btn-danger-outline">Delete run</button>
+                  <span id="modal-notice" class="modal-notice" aria-live="polite"></span>
+                </div>
+
+                <div id="modal-delete-confirm" class="confirm-strip" role="alert" hidden>
+                  <span id="modal-delete-msg">Delete this forecast run permanently?</span>
+                  <div class="confirm-strip-actions">
+                    <button type="button" id="modal-delete-yes" class="btn-danger">Confirm Delete</button>
+                    <button type="button" id="modal-delete-no" class="btn-secondary">Cancel</button>
+                  </div>
+                </div>
+
+                <dl id="modal-meta-grid" class="modal-meta-grid"></dl>
+
+                <section class="modal-repro-panel" aria-label="Reproducibility metadata">
+                  <h4 class="section-label">Reproducibility</h4>
+                  <dl id="modal-repro-grid" class="repro-grid"></dl>
+                </section>
+
+                <div id="modal-empty" class="modal-empty" hidden>
+                  No stored forecast values were found for this run.
+                </div>
+
+                <div id="modal-chart" class="chart-container-modal"></div>
+
+                <div class="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th scope="col">Date</th>
+                        <th scope="col" class="num">Median</th>
+                        <th scope="col" class="num">Expected</th>
+                        <th scope="col" class="num">Low (10th)</th>
+                        <th scope="col" class="num">High (90th)</th>
+                      </tr>
+                    </thead>
+                    <tbody id="modal-values-tbody"></tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           </div>
         </div>

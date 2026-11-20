@@ -5,20 +5,123 @@ Guarantees consistent output schemas and persists all forecasting experiments to
 """
 from __future__ import annotations
 
+import hashlib
+import importlib.metadata
 import json
+import math
 import time
 import uuid
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
 from .baseline import forecast_seasonal_naive
-from .config import MODEL_ID
+from .config import CONTEXT_LENGTH, DATA_DIR, MODEL_ID
+from .data_loader import get_series as get_series_legacy
+from .dataset_manager import get_dataset_version, get_series_history
 from .db import get_db, init_db, now_iso
 from .evaluation import compute_metrics
-from .forecaster import ForecastError, forecast as forecast_chronos, load_pipeline
+from .forecaster import DENSE_QUANTILES, ForecastError, forecast as forecast_chronos, load_pipeline
 from .lgbm_forecaster import LightGBMForecaster, list_trained_models, load_trained_forecaster
+
+_HASH_CACHE: dict[tuple[str, int, int], str] = {}
+_PKG_VERSIONS_CACHE: dict[str, str] | None = None
+
+
+def _safe_float(val: Any) -> float | None:
+    if val is None:
+        return None
+    try:
+        f = float(val)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
+def _engine_label(model_type: str) -> str:
+    mt = (model_type or "").lower().strip()
+    if mt == "chronos":
+        return "Chronos-2"
+    if mt in ("lightgbm", "custom", "custom_model"):
+        return "Custom (LightGBM)"
+    if mt == "baseline":
+        return "Baseline (Seasonal-Naive)"
+    return model_type or "Unknown"
+
+
+def _file_sha256(path: Path) -> str | None:
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    key = (str(path), st.st_mtime_ns, st.st_size)
+    if key in _HASH_CACHE:
+        return _HASH_CACHE[key]
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    digest = h.hexdigest()
+    _HASH_CACHE[key] = digest
+    return digest
+
+
+def _resolve_dataset_file(dataset_id: str) -> tuple[str | None, str | None]:
+    v_info = get_dataset_version(dataset_id) if dataset_id else None
+    candidates: list[Path] = []
+    if v_info:
+        if v_info.get("original_file_path"):
+            candidates.append(Path(v_info["original_file_path"]))
+        if v_info.get("processed_file_path"):
+            candidates.append(Path(v_info["processed_file_path"]))
+    candidates.extend([DATA_DIR / "sales_train_validation.csv", DATA_DIR / "demand_history.csv"])
+
+    for p in candidates:
+        if p.exists() and p.is_file():
+            return p.name, _file_sha256(p)
+    return None, None
+
+
+def _package_versions() -> dict[str, str]:
+    global _PKG_VERSIONS_CACHE
+    if _PKG_VERSIONS_CACHE is not None:
+        return dict(_PKG_VERSIONS_CACHE)
+    pkgs = ("chronos-forecasting", "torch", "pandas", "numpy", "lightgbm", "fastapi")
+    versions: dict[str, str] = {}
+    for pkg in pkgs:
+        try:
+            versions[pkg] = importlib.metadata.version(pkg)
+        except importlib.metadata.PackageNotFoundError:
+            versions[pkg] = "not installed"
+    _PKG_VERSIONS_CACHE = versions
+    return dict(versions)
+
+
+def _build_reproducibility(
+    dataset_id: str,
+    model_type_clean: str,
+    used_model_id: str,
+    device: str,
+    legacy: bool = False,
+) -> dict[str, Any]:
+    data_file, data_hash = _resolve_dataset_file(dataset_id)
+    mt = (model_type_clean or "").lower().strip()
+    return {
+        "model_id": used_model_id,
+        "engine": _engine_label(mt),
+        "device": device,
+        "packages": _package_versions(),
+        "data_file": data_file,
+        "data_sha256": data_hash,
+        "parameters": {
+            "context_length": CONTEXT_LENGTH if mt == "chronos" else (7 if mt == "baseline" else None),
+            "quantile_levels": list(DENSE_QUANTILES) if mt == "chronos" else [0.1, 0.5, 0.9],
+        },
+        "post_processing": "Clip negative values at 0",
+        "legacy_inferred": legacy,
+    }
 
 
 def generate_single_forecast(
@@ -117,6 +220,7 @@ def generate_single_forecast(
     # Persist into database
     hist_end = str(history_df["date"].max()) if "date" in history_df else ""
     fc_start = dates[0] if dates else ""
+    repro = _build_reproducibility(dataset_id, model_type_clean, used_model_id, device, legacy=False)
 
     with get_db() as conn:
         conn.execute(
@@ -124,8 +228,8 @@ def generate_single_forecast(
             INSERT INTO forecast_runs (
                 id, dataset_id, version_id, series_id, model_type, model_id,
                 horizon, context_end, forecast_start, execution_time_sec,
-                metrics_json, status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                metrics_json, status, created_at, device, reproducibility_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 run_id,
@@ -141,6 +245,8 @@ def generate_single_forecast(
                 None,
                 "COMPLETED",
                 now_iso(),
+                device,
+                json.dumps(repro),
             ),
         )
 
@@ -263,38 +369,126 @@ def compare_models(
     }
 
 
+def _build_run_where(
+    dataset_id: str | None = None,
+    series_id: str | None = None,
+    model_type: str | None = None,
+) -> tuple[str, list[Any]]:
+    clause = " WHERE 1=1"
+    params: list[Any] = []
+    if dataset_id:
+        clause += " AND fr.dataset_id = ?"
+        params.append(dataset_id)
+    if series_id:
+        clause += " AND fr.series_id = ?"
+        params.append(series_id)
+    if model_type:
+        mt = model_type.lower().strip()
+        if mt in ("custom", "custom_model", "lightgbm"):
+            clause += " AND fr.model_type IN ('lightgbm', 'custom')"
+        else:
+            clause += " AND fr.model_type = ?"
+            params.append(mt)
+    return clause, params
+
+
+def count_forecast_runs(
+    dataset_id: str | None = None,
+    series_id: str | None = None,
+    model_type: str | None = None,
+) -> int:
+    """Count total forecasting runs matching filters."""
+    init_db()
+    where_sql, params = _build_run_where(dataset_id=dataset_id, series_id=series_id, model_type=model_type)
+    with get_db() as conn:
+        row = conn.execute(f"SELECT COUNT(*) AS cnt FROM forecast_runs fr{where_sql}", params).fetchone()
+    return int(row["cnt"]) if row else 0
+
+
 def list_forecast_runs(
     dataset_id: str | None = None,
     series_id: str | None = None,
+    model_type: str | None = None,
     limit: int = 50,
+    offset: int = 0,
+    sort: str = "newest",
 ) -> list[dict[str, Any]]:
     """Query recent forecasting runs from database."""
     init_db()
-    with get_db() as conn:
-        query = """
-            SELECT fr.*,
-                   COUNT(fv.id) as point_count
-            FROM forecast_runs fr
-            LEFT JOIN forecast_values fv ON fr.id = fv.forecast_run_id
-            WHERE 1=1
-        """
-        params: list[Any] = []
-        if dataset_id:
-            query += " AND fr.dataset_id = ?"
-            params.append(dataset_id)
-        if series_id:
-            query += " AND fr.series_id = ?"
-            params.append(series_id)
+    where_sql, params = _build_run_where(dataset_id=dataset_id, series_id=series_id, model_type=model_type)
+    order_dir = "ASC" if sort == "oldest" else "DESC"
+    query = f"""
+        SELECT fr.*,
+               COUNT(fv.id) as point_count
+        FROM forecast_runs fr
+        LEFT JOIN forecast_values fv ON fr.id = fv.forecast_run_id
+        {where_sql}
+        GROUP BY fr.id
+        ORDER BY fr.created_at {order_dir}
+        LIMIT ? OFFSET ?
+    """
+    params.extend([limit, offset])
 
-        query += " GROUP BY fr.id ORDER BY fr.created_at DESC LIMIT ?"
-        params.append(limit)
+    with get_db() as conn:
         rows = conn.execute(query, params).fetchall()
 
-    return [dict(r) for r in rows]
+    items: list[dict[str, Any]] = []
+    for r in rows:
+        d = dict(r)
+        d["engine_label"] = _engine_label(d.get("model_type", ""))
+        if not d.get("device"):
+            d["device"] = "cpu" if d.get("model_type") in ("lightgbm", "custom", "baseline") else "unknown"
+        d["execution_time_sec"] = _safe_float(d.get("execution_time_sec"))
+        items.append(d)
+    return items
 
 
-def get_forecast_run_details(run_id: str) -> dict[str, Any] | None:
-    """Fetch complete details and curves of a specific forecast run."""
+def _load_history_tail(
+    dataset_id: str,
+    series_id: str,
+    context_end: str | None,
+    history_tail_days: int,
+    sales_df: pd.DataFrame | None = None,
+) -> dict[str, list[Any]]:
+    if history_tail_days <= 0:
+        return {"dates": [], "sales": []}
+
+    hist_df: pd.DataFrame | None = None
+    try:
+        hist_df = get_series_history(dataset_id, series_id)
+    except Exception:
+        hist_df = None
+
+    if (hist_df is None or hist_df.empty) and sales_df is not None and not sales_df.empty:
+        try:
+            hist_df = get_series_legacy(sales_df, series_id)
+        except Exception:
+            hist_df = None
+
+    if hist_df is None or hist_df.empty:
+        return {"dates": [], "sales": []}
+
+    hist_df = hist_df.sort_values("date").reset_index(drop=True)
+    if context_end:
+        try:
+            cutoff = pd.Timestamp(context_end)
+            hist_df = hist_df[hist_df["date"] <= cutoff]
+        except Exception:
+            pass
+
+    tail = hist_df.tail(history_tail_days)
+    return {
+        "dates": [pd.Timestamp(d).strftime("%Y-%m-%d") for d in tail["date"]],
+        "sales": [_safe_float(v) for v in tail["sales"]],
+    }
+
+
+def get_forecast_run_details(
+    run_id: str,
+    history_tail_days: int = 60,
+    sales_df: pd.DataFrame | None = None,
+) -> dict[str, Any] | None:
+    """Fetch complete details, reproducibility metadata, history tail, and curves of a run."""
     init_db()
     with get_db() as conn:
         run = conn.execute("SELECT * FROM forecast_runs WHERE id = ?", (run_id,)).fetchone()
@@ -305,5 +499,74 @@ def get_forecast_run_details(run_id: str) -> dict[str, Any] | None:
             "SELECT * FROM forecast_values WHERE forecast_run_id = ? ORDER BY timestamp ASC",
             (run_id,),
         ).fetchall()
-        res["values"] = [dict(v) for v in values]
+
+    clean_values: list[dict[str, Any]] = []
+    for row in values:
+        v = dict(row)
+        for col in ("predicted_median", "lower_bound", "upper_bound", "expected", "actual"):
+            v[col] = _safe_float(v.get(col))
+        clean_values.append(v)
+
+    repro: dict[str, Any] | None = None
+    raw_repro = res.get("reproducibility_json")
+    if raw_repro:
+        try:
+            repro = json.loads(raw_repro)
+        except (TypeError, json.JSONDecodeError):
+            repro = None
+
+    inferred_device = res.get("device") or (
+        "cpu" if res.get("model_type") in ("lightgbm", "custom", "baseline") else "unknown"
+    )
+    if repro is None:
+        repro = _build_reproducibility(
+            dataset_id=res.get("dataset_id", ""),
+            model_type_clean=res.get("model_type", ""),
+            used_model_id=res.get("model_id") or "",
+            device=inferred_device,
+            legacy=True,
+        )
+
+    parsed_metrics: dict[str, Any] | None = None
+    if res.get("metrics_json"):
+        try:
+            parsed_metrics = json.loads(res["metrics_json"])
+        except (TypeError, json.JSONDecodeError):
+            parsed_metrics = None
+
+    exp_vals = [
+        v["expected"] if v["expected"] is not None else v["predicted_median"]
+        for v in clean_values
+        if v["expected"] is not None or v["predicted_median"] is not None
+    ]
+
+    res["values"] = clean_values
+    res["engine_label"] = _engine_label(res.get("model_type", ""))
+    res["device"] = res.get("device") or repro.get("device") or inferred_device
+    res["execution_time_sec"] = _safe_float(res.get("execution_time_sec"))
+    res["reproducibility"] = repro
+    res["metrics"] = parsed_metrics
+    res["summary"] = {
+        "point_count": len(clean_values),
+        "total_expected": _safe_float(sum(exp_vals)) if exp_vals else None,
+        "daily_average_expected": _safe_float(sum(exp_vals) / len(exp_vals)) if exp_vals else None,
+        "forecast_start": clean_values[0]["timestamp"] if clean_values else res.get("forecast_start"),
+        "forecast_end": clean_values[-1]["timestamp"] if clean_values else None,
+    }
+    res["history_tail"] = _load_history_tail(
+        dataset_id=res.get("dataset_id", ""),
+        series_id=res.get("series_id", ""),
+        context_end=res.get("context_end"),
+        history_tail_days=history_tail_days,
+        sales_df=sales_df,
+    )
     return res
+
+
+def delete_forecast_run(run_id: str) -> bool:
+    """Delete a stored forecast run and its values. Returns True if deleted."""
+    init_db()
+    with get_db() as conn:
+        conn.execute("DELETE FROM forecast_values WHERE forecast_run_id = ?", (run_id,))
+        cur = conn.execute("DELETE FROM forecast_runs WHERE id = ?", (run_id,))
+        return cur.rowcount > 0

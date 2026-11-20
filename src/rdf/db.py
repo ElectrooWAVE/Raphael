@@ -156,6 +156,16 @@ def init_db(db_path: Path = DB_PATH) -> None:
         CREATE INDEX IF NOT EXISTS idx_dv_dataset ON dataset_versions(dataset_id);
         CREATE INDEX IF NOT EXISTS idx_mtr_model ON model_training_runs(model_id);
         CREATE INDEX IF NOT EXISTS idx_fr_dataset_series ON forecast_runs(dataset_id, series_id);
+        CREATE INDEX IF NOT EXISTS idx_fr_created_at ON forecast_runs(created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_fv_run ON forecast_values(forecast_run_id);
         CREATE INDEX IF NOT EXISTS idx_er_run ON evaluation_results(evaluation_run_id);
         """)
+
+        existing_cols = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(forecast_runs)").fetchall()
+        }
+        if "device" not in existing_cols:
+            conn.execute("ALTER TABLE forecast_runs ADD COLUMN device TEXT")
+        if "reproducibility_json" not in existing_cols:
+            conn.execute("ALTER TABLE forecast_runs ADD COLUMN reproducibility_json TEXT")
