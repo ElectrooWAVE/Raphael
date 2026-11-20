@@ -1,4 +1,5 @@
 """Central settings. Change values here, not inside other modules."""
+import os
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -8,6 +9,8 @@ RAW_DIR = STORAGE_DIR / "raw"
 PROCESSED_DIR = STORAGE_DIR / "processed"
 MODELS_DIR = STORAGE_DIR / "models"
 DB_PATH = STORAGE_DIR / "metadata.db"
+MAX_UPLOAD_MB = int(os.environ.get("RDF_MAX_UPLOAD_MB", "100"))
+MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 
 # Create directories if they do not exist
 for _dir in (STORAGE_DIR, RAW_DIR, PROCESSED_DIR, MODELS_DIR):

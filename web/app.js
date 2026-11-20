@@ -8,17 +8,26 @@ const state = {
   selectedStore: "",
   selectedModel: "chronos",
   horizon: 28,
-  rangeKey: "ALL",
+  rangeKey: "1Y",
+  showMa7: false,
+  health: null,
   history: null,
   forecast: null,
   evalMetrics: null,
+  lastComparison: null,
+  cmpIntervalEngines: new Set(),
   loadingInitial: true,
   loadingForecast: false,
   loadingEval: false,
+  activeDatasetLabel: "",
   error: "",
+  canRetryInit: false,
   animToken: 0,
   rafId: 0,
   selectedFile: null,
+  wizardMeta: null,
+  wizardValidation: null,
+  pendingDeleteDatasetId: null,
   historyQuery: {
     seriesId: "",
     modelType: "",
@@ -79,11 +88,12 @@ function currentSeriesId() {
 // --- API Helpers ---
 
 async function apiFetch(url, options = {}) {
+  const method = (options.method || "GET").toUpperCase();
   let response;
   try {
     response = await fetch(url, options);
   } catch {
-    throw new Error("Cannot reach the server. Is it running on port 8000?");
+    throw new Error(`${method} ${url} failed: Cannot reach the server. Is it running on port 8000?`);
   }
 
   let payload = null;
@@ -94,13 +104,14 @@ async function apiFetch(url, options = {}) {
   }
 
   if (!response.ok) {
-    const message = payload && payload.detail ? String(payload.detail) : `Request failed (${response.status}).`;
-    throw new Error(message);
+    const detail = payload && payload.detail ? String(payload.detail) : response.statusText || "Request failed";
+    throw new Error(`${method} ${url} (${response.status}): ${detail}`);
   }
   return payload;
 }
 
 const api = {
+  getHealth: () => apiFetch("/api/health"),
   getSeries: () => apiFetch("/api/series"),
   getHistory: (seriesId) => apiFetch(`/api/history?series_id=${encodeURIComponent(seriesId)}`),
   postForecast: (seriesId, horizon, modelType) =>
@@ -117,6 +128,7 @@ const api = {
     }),
   getOverview: () => apiFetch("/api/overview"),
   getDatasets: () => apiFetch("/api/datasets"),
+  deleteDataset: (datasetId) => apiFetch(`/api/datasets/${encodeURIComponent(datasetId)}`, { method: "DELETE" }),
   getHistoryRuns: (params = {}) => {
     const q = new URLSearchParams();
     q.set("paginated", "true");
@@ -328,41 +340,58 @@ function renderStatus() {
   const loadingEl = el("loading-text");
   const hintEl = el("empty-hint");
   const errorEl = el("error-banner");
+  const errorTextEl = el("error-text");
+  const retryBtn = el("retry-init-btn");
 
   if (state.loadingInitial) {
     summaryEl.textContent = "Loading products...";
   } else if (state.history && state.history.summary) {
     const s = state.history.summary;
+    const dsPrefix = state.activeDatasetLabel ? `Dataset: ${state.activeDatasetLabel} | ` : "";
     summaryEl.textContent =
-      `${formatDate(s.start)} to ${formatDate(s.end)} | ${intFmt.format(s.days)} days | ` +
+      `${dsPrefix}${formatDate(s.start)} to ${formatDate(s.end)} | ${intFmt.format(s.days)} days | ` +
       `${intFmt.format(s.zero_days)} zero-sales days kept | ${intFmt.format(s.missing_days)} missing days`;
+  } else if (state.error) {
+    summaryEl.textContent = "Could not load series summary.";
   }
 
   loadingEl.hidden = !state.loadingForecast;
   hintEl.hidden = Boolean(state.loadingInitial || state.loadingForecast || state.forecast || state.error);
 
   if (state.error) {
-    errorEl.textContent = state.error;
+    errorTextEl.textContent = state.error;
+    retryBtn.hidden = !state.canRetryInit;
     errorEl.hidden = false;
   } else {
+    errorTextEl.textContent = "";
+    retryBtn.hidden = true;
     errorEl.hidden = true;
   }
 }
 
 function renderKpis(animateCount = false) {
   el("kpi-total-label").textContent = `Total predicted demand (${state.horizon} days)`;
+  const totalEl = el("kpi-total-value");
+  const avgEl = el("kpi-avg-value");
+  const changeEl = el("kpi-change-value");
   const totalUnit = el("kpi-total-unit");
   const avgUnit = el("kpi-avg-unit");
 
   if (!state.forecast) {
-    el("kpi-total-value").textContent = "-";
-    el("kpi-avg-value").textContent = "-";
-    el("kpi-change-value").textContent = "-";
+    totalEl.textContent = "Click Generate Forecast";
+    avgEl.textContent = "Click Generate Forecast";
+    changeEl.textContent = "Compared after forecast";
+    totalEl.classList.add("kpi-placeholder");
+    avgEl.classList.add("kpi-placeholder");
+    changeEl.classList.add("kpi-placeholder");
     totalUnit.hidden = true;
     avgUnit.hidden = true;
     return;
   }
 
+  totalEl.classList.remove("kpi-placeholder");
+  avgEl.classList.remove("kpi-placeholder");
+  changeEl.classList.remove("kpi-placeholder");
   totalUnit.hidden = false;
   avgUnit.hidden = false;
   const pct = computePrevPeriodChange(state.history, state.forecast);
@@ -370,9 +399,9 @@ function renderKpis(animateCount = false) {
   if (animateCount) {
     animateKpiCountUp(state.forecast, pct, state.animToken);
   } else {
-    el("kpi-total-value").textContent = intFmt.format(Math.round(state.forecast.total));
-    el("kpi-avg-value").textContent = dec1Fmt.format(state.forecast.daily_average);
-    el("kpi-change-value").textContent = pct === null ? "n/a" : `${pct >= 0 ? "+" : ""}${dec1Fmt.format(pct)}%`;
+    totalEl.textContent = intFmt.format(Math.round(state.forecast.total));
+    avgEl.textContent = dec1Fmt.format(state.forecast.daily_average);
+    changeEl.textContent = pct === null ? "n/a" : `${pct >= 0 ? "+" : ""}${dec1Fmt.format(pct)}%`;
   }
 }
 
@@ -402,6 +431,22 @@ function renderStrip() {
   el("strip-peak").textContent = `${formatDate(f.dates[peakIdx])} (${dec1Fmt.format(f.median[peakIdx])} units)`;
 }
 
+function computeRollingMean7(sales) {
+  const out = [];
+  const win = [];
+  for (let i = 0; i < sales.length; i += 1) {
+    const val = sales[i];
+    if (val !== null && val !== undefined && Number.isFinite(val)) {
+      win.push(val);
+      if (win.length > 7) win.shift();
+      out.push(win.reduce((a, b) => a + b, 0) / win.length);
+    } else {
+      out.push(null);
+    }
+  }
+  return out;
+}
+
 function buildChartLayout(hasForecast) {
   const win = computeRangeWindow(state.rangeKey);
   const layout = {
@@ -413,25 +458,33 @@ function buildChartLayout(hasForecast) {
     showlegend: true,
     legend: { orientation: "h", x: 0, y: 1.12, font: { size: 11 } },
     hovermode: "x unified",
+    hoverlabel: {
+      bgcolor: "#FFFFFF",
+      bordercolor: COLORS.border,
+      font: { family: "Inter, system-ui, sans-serif", size: 13, color: COLORS.text },
+    },
     xaxis: {
       type: "date",
       showgrid: true,
       gridcolor: COLORS.grid,
       gridwidth: 1,
+      showspikes: false,
+      hoverformat: "%a, %d %b %Y",
       zeroline: false,
       tickcolor: COLORS.border,
-      tickfont: { color: COLORS.tick, size: 11 },
+      tickfont: { color: COLORS.tick, size: 12 },
       rangeslider: { visible: false },
     },
     yaxis: {
-      title: { text: "Units", font: { size: 12, color: COLORS.tick } },
+      title: { text: "Units sold", font: { size: 12, color: COLORS.tick } },
       showgrid: true,
       gridcolor: COLORS.grid,
       gridwidth: 1,
       zeroline: true,
       zerolinecolor: COLORS.border,
       rangemode: "tozero",
-      tickfont: { color: COLORS.tick, size: 11 },
+      tickformat: ",.0f",
+      tickfont: { color: COLORS.tick, size: 12 },
     },
   };
 
@@ -457,14 +510,25 @@ function renderChart(animateReveal = false) {
       mode: "lines",
       name: "Actual daily sales",
       line: { color: COLORS.primary, width: 1.8 },
-      hovertemplate: "Actual sales: %{y:,.0f} units<extra></extra>",
+      hovertemplate: "Actual sales: %{y:,.1f} units<extra></extra>",
     },
   ];
 
+  if (state.showMa7) {
+    traces.push({
+      x: hDates,
+      y: computeRollingMean7(hSales),
+      type: "scatter",
+      mode: "lines",
+      name: "7-day average (actual)",
+      line: { color: "#0F766E", width: 1.8, dash: "dot" },
+      hovertemplate: "7-day average: %{y:,.1f} units<extra></extra>",
+    });
+  }
+
   if (hasForecast) {
     const f = state.forecast;
-    const modelColor = state.selectedModel === "custom" ? COLORS.custom : COLORS.chronos;
-    const modelName = state.selectedModel === "custom" ? "Custom Model" : state.selectedModel === "baseline" ? "Baseline" : "Chronos-2";
+    const modelName = state.selectedModel === "custom" ? "Custom Model" : state.selectedModel === "baseline" ? "Seasonal Baseline" : "Chronos-2";
 
     traces.push(
       {
@@ -486,7 +550,7 @@ function renderChart(animateReveal = false) {
         fillcolor: COLORS.intervalFill,
         name: "80% prediction interval",
         line: { color: "transparent", width: 0 },
-        hovertemplate: "Interval: %{y:,.1f} - %{customdata:,.1f}<extra></extra>",
+        hovertemplate: "80% interval: %{y:,.1f} - %{customdata:,.1f} units<extra></extra>",
         customdata: f.q90,
       },
       {
@@ -496,7 +560,7 @@ function renderChart(animateReveal = false) {
         mode: "lines",
         name: `${modelName} (median)`,
         line: { color: COLORS.custom, width: 2.4 },
-        hovertemplate: `${modelName}: %{y:,.1f} units<extra></extra>`,
+        hovertemplate: `${modelName} (median): %{y:,.1f} units<extra></extra>`,
       }
     );
   }
@@ -531,8 +595,16 @@ function renderTable() {
   }
 }
 
-function renderAbout() {
+function renderHealth() {
   const pill = el("device-pill");
+  const ovDev = el("ov-device");
+  if (!state.health) return;
+  const label = state.health.device_label || state.health.chronos_device || "CPU";
+  if (pill) pill.textContent = label;
+  if (ovDev) ovDev.textContent = label;
+}
+
+function renderAbout() {
   const aboutModel = el("about-model");
   const aboutMethod = el("about-method");
 
@@ -548,9 +620,7 @@ function renderAbout() {
   }
 
   if (state.forecast) {
-    const dev = String(state.forecast.device || "CPU").toUpperCase();
-    el("about-device").textContent = dev;
-    pill.textContent = dev;
+    el("about-device").textContent = String(state.forecast.device || "CPU").toUpperCase();
   } else {
     el("about-device").textContent = "-";
   }
@@ -634,7 +704,7 @@ async function loadSelectedHistory() {
   if (!state.selectedProduct || !state.selectedStore) return;
   cancelAnimations();
   state.forecast = null;
-  state.rangeKey = "ALL";
+  state.rangeKey = "1Y";
   state.error = "";
   renderAll();
 
@@ -703,7 +773,9 @@ async function loadOverview() {
     const data = await api.getOverview();
     el("ov-series").textContent = intFmt.format(data.total_series || 75);
     el("ov-records").textContent = intFmt.format(data.total_records || 143475);
-    el("ov-device").textContent = String(data.device || "CPU").toUpperCase();
+    const devLabel = data.device_label || data.device || "CPU";
+    el("ov-device").textContent = devLabel;
+    if (el("device-pill")) el("device-pill").textContent = devLabel;
 
     const tbody = el("ov-recent-tbody");
     tbody.innerHTML = "";
@@ -773,6 +845,10 @@ async function handleRunComparison() {
     }
 
     const comp = await api.postCompare(sid, horizon, cutoff);
+    state.lastComparison = comp;
+    const winner = (comp.best_models && comp.best_models.mae) || "chronos";
+    state.cmpIntervalEngines = new Set([winner]);
+    renderComparisonIntervalToggles(comp);
     renderComparisonChart(comp);
     renderComparisonTable(comp);
     el("cmp-status-text").textContent = `Comparison complete for ${sid} across ${horizon} days.`;
@@ -785,9 +861,32 @@ async function handleRunComparison() {
   }
 }
 
+function renderComparisonIntervalToggles(data) {
+  const box = el("cmp-interval-toggles");
+  if (!box) return;
+  box.textContent = "";
+  const labels = { chronos: "Chronos-2 80% Interval", custom: "Custom Model 80% Interval" };
+  for (const key of ["chronos", "custom"]) {
+    const fc = data.forecasts && data.forecasts[key];
+    if (!fc || fc.error || !fc.q10 || !fc.q90) continue;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "chip-toggle";
+    btn.setAttribute("aria-pressed", String(state.cmpIntervalEngines.has(key)));
+    btn.textContent = labels[key];
+    btn.addEventListener("click", () => {
+      if (state.cmpIntervalEngines.has(key)) state.cmpIntervalEngines.delete(key);
+      else state.cmpIntervalEngines.add(key);
+      btn.setAttribute("aria-pressed", String(state.cmpIntervalEngines.has(key)));
+      renderComparisonChart(state.lastComparison);
+    });
+    box.appendChild(btn);
+  }
+}
+
 function renderComparisonChart(data) {
   const chartEl = el("cmp-chart");
-  if (typeof Plotly === "undefined") return;
+  if (!data || typeof Plotly === "undefined") return;
 
   const traces = [];
 
@@ -800,14 +899,15 @@ function renderComparisonChart(data) {
       name: "Actual Demand",
       line: { color: COLORS.actual, width: 2.2 },
       marker: { size: 5 },
+      hovertemplate: "Actual Demand: %{y:,.1f} units<extra></extra>",
     });
   }
 
   const modelMap = {
-    chronos: { name: "Chronos-2 (Zero-Shot)", color: COLORS.chronos, dash: "solid" },
-    custom: { name: "Custom Model", color: COLORS.custom, dash: "solid" },
-    lightgbm: { name: "Custom Model", color: COLORS.custom, dash: "solid" },
-    baseline: { name: "Seasonal Baseline", color: COLORS.baseline, dash: "dash" },
+    chronos: { name: "Chronos-2 (median)", color: COLORS.chronos, dash: "solid" },
+    custom: { name: "Custom Model (median)", color: COLORS.custom, dash: "solid" },
+    lightgbm: { name: "Custom Model (median)", color: COLORS.custom, dash: "solid" },
+    baseline: { name: "Seasonal Baseline (median)", color: COLORS.baseline, dash: "dash" },
   };
 
   for (const [key, fc] of Object.entries(data.forecasts)) {
@@ -821,9 +921,10 @@ function renderComparisonChart(data) {
       mode: "lines",
       name: info.name,
       line: { color: info.color, width: 2.2, dash: info.dash },
+      hovertemplate: `${info.name}: %{y:,.1f} units<extra></extra>`,
     });
 
-    if (fc.q10 && fc.q90 && key !== "baseline") {
+    if (fc.q10 && fc.q90 && key !== "baseline" && state.cmpIntervalEngines.has(key)) {
       traces.push(
         {
           x: fc.dates,
@@ -842,7 +943,9 @@ function renderComparisonChart(data) {
           fill: "tonexty",
           fillcolor: key === "chronos" ? COLORS.chronosFill : COLORS.intervalFill,
           line: { color: "transparent" },
-          name: `${info.name} 80% Interval`,
+          name: `${info.name.replace(" (median)", "")} 80% Interval`,
+          hovertemplate: `${info.name.replace(" (median)", "")} 80% interval: %{y:,.1f} - %{customdata:,.1f} units<extra></extra>`,
+          customdata: fc.q90,
         }
       );
     }
@@ -853,9 +956,27 @@ function renderComparisonChart(data) {
     plot_bgcolor: COLORS.plotBg,
     margin: { l: 58, r: 16, t: 36, b: 30 },
     height: 440,
-    font: { family: "Inter, sans-serif", size: 12 },
-    xaxis: { gridcolor: COLORS.grid },
-    yaxis: { gridcolor: COLORS.grid, title: "Units" },
+    hovermode: "x unified",
+    hoverlabel: {
+      bgcolor: "#FFFFFF",
+      bordercolor: COLORS.border,
+      font: { family: "Inter, system-ui, sans-serif", size: 13, color: COLORS.text },
+    },
+    font: { family: "Inter, system-ui, sans-serif", size: 12, color: COLORS.text },
+    xaxis: {
+      type: "date",
+      gridcolor: COLORS.grid,
+      showspikes: false,
+      hoverformat: "%a, %d %b %Y",
+      tickfont: { color: COLORS.tick, size: 12 },
+    },
+    yaxis: {
+      gridcolor: COLORS.grid,
+      title: { text: "Units sold", font: { size: 13, color: COLORS.text } },
+      tickfont: { color: COLORS.tick, size: 12 },
+      tickformat: ",.0f",
+      rangemode: "tozero",
+    },
     legend: { orientation: "h", y: 1.12, x: 0 },
   };
 
@@ -900,24 +1021,101 @@ function renderComparisonTable(data) {
 
 // --- Data Management Controller ---
 
+function hideDatasetDeleteConfirm() {
+  state.pendingDeleteDatasetId = null;
+  const box = el("ds-delete-confirm");
+  if (box) box.hidden = true;
+}
+
+function requestDatasetDelete(ds) {
+  state.pendingDeleteDatasetId = ds.id;
+  const usedParts = [];
+  if (ds.model_count > 0) usedParts.push(`${ds.model_count} trained model(s)`);
+  if (ds.run_count > 0) usedParts.push(`${ds.run_count} forecast run(s)`);
+  const warnText = usedParts.length > 0 ? ` Warning: used by ${usedParts.join(" and ")}.` : "";
+  el("ds-delete-msg").textContent = `Delete dataset "${ds.name}" (${ds.id}) and all ${ds.version_count || ds.version_num || 1} version(s)?${warnText}`;
+  el("ds-delete-confirm").hidden = false;
+}
+
 async function loadDatasetsView() {
+  hideDatasetDeleteConfirm();
   try {
     const list = await api.getDatasets();
     const tbody = el("ds-list-tbody");
-    tbody.innerHTML = "";
-    list.forEach((d) => {
+    tbody.textContent = "";
+    if (!list || list.length === 0) {
       const tr = document.createElement("tr");
-      tr.innerHTML = `
-        <td><strong>${d.name}</strong><br><small class="text-muted"><code>${d.id}</code></small></td>
-        <td>v${d.version_num}</td>
-        <td class="num">${intFmt.format(d.num_records)}</td>
-        <td class="num">${d.num_series}</td>
-        <td>${d.date_start} to ${d.date_end}</td>
-        <td><span class="pill">${d.quality_report ? d.quality_report.quality_status : "HEALTHY"}</span></td>
-      `;
-      tr.onclick = () => showDatasetQuality(d);
+      const td = document.createElement("td");
+      td.colSpan = 7;
+      td.className = "muted-cell";
+      td.textContent = "No datasets imported yet.";
+      tr.appendChild(td);
       tbody.appendChild(tr);
-    });
+      return;
+    }
+
+    for (const d of list) {
+      const tr = document.createElement("tr");
+
+      const tdName = document.createElement("td");
+      const strong = document.createElement("strong");
+      strong.textContent = d.name;
+      const br = document.createElement("br");
+      const code = document.createElement("code");
+      code.textContent = d.id;
+      tdName.appendChild(strong);
+      tdName.appendChild(br);
+      tdName.appendChild(code);
+      tr.appendChild(tdName);
+
+      const tdVer = document.createElement("td");
+      tdVer.textContent = `v${d.version_num}`;
+      tr.appendChild(tdVer);
+
+      const tdRec = document.createElement("td");
+      tdRec.className = "num";
+      tdRec.textContent = intFmt.format(d.num_records || 0);
+      tr.appendChild(tdRec);
+
+      const tdSer = document.createElement("td");
+      tdSer.className = "num";
+      tdSer.textContent = intFmt.format(d.num_series || 0);
+      tr.appendChild(tdSer);
+
+      const tdCov = document.createElement("td");
+      tdCov.textContent = `${d.date_start || "-"} to ${d.date_end || "-"}`;
+      tr.appendChild(tdCov);
+
+      const tdStatus = document.createElement("td");
+      const pill = document.createElement("span");
+      pill.className = "pill";
+      pill.textContent = d.quality_report ? d.quality_report.quality_status : "HEALTHY";
+      tdStatus.appendChild(pill);
+      tr.appendChild(tdStatus);
+
+      const tdAct = document.createElement("td");
+      const actBox = document.createElement("div");
+      actBox.className = "history-actions";
+
+      const viewBtn = document.createElement("button");
+      viewBtn.type = "button";
+      viewBtn.className = "btn-secondary";
+      viewBtn.textContent = "View report";
+      viewBtn.addEventListener("click", () => showDatasetQuality(d));
+
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "btn-danger-outline";
+      delBtn.textContent = "Delete";
+      delBtn.addEventListener("click", () => requestDatasetDelete(d));
+
+      actBox.appendChild(viewBtn);
+      actBox.appendChild(delBtn);
+      tdAct.appendChild(actBox);
+      tr.appendChild(tdAct);
+
+      tbody.appendChild(tr);
+    }
   } catch (err) {
     showAlert(err.message);
   }
@@ -926,68 +1124,382 @@ async function loadDatasetsView() {
 function showDatasetQuality(ds) {
   const card = el("ds-quality-card");
   const content = el("ds-quality-content");
+  const warnEl = el("ds-quality-warnings");
   if (!ds.quality_report) {
     card.hidden = true;
     return;
   }
   const q = ds.quality_report;
   card.hidden = false;
-  content.innerHTML = `
-    <div><dt>Zero-Sales Days</dt><dd>${intFmt.format(q.zero_sales_count)}</dd></div>
-    <div><dt>Negative Observations</dt><dd>${q.negative_sales_count}</dd></div>
-    <div><dt>Duplicates Aggregated</dt><dd>${q.duplicate_count}</dd></div>
-    <div><dt>Timeline Gaps</dt><dd>${q.gap_count}</dd></div>
-  `;
+  el("ds-quality-title").textContent = `Data Quality Report: ${ds.name} (v${ds.version_num})`;
+  content.textContent = "";
+  appendDlItem(content, "Records", intFmt.format(q.num_records || 0));
+  appendDlItem(content, "Series Count", intFmt.format(q.num_series || 0));
+  appendDlItem(content, "Zero-Sales Days Kept", intFmt.format(q.zero_sales_count || 0));
+  appendDlItem(content, "Missing Target NaNs", intFmt.format(q.missing_target_count || 0));
+  appendDlItem(content, "Negative Values", intFmt.format(q.negative_sales_count || 0));
+  appendDlItem(content, "Duplicates", intFmt.format(q.duplicate_count || 0));
+  appendDlItem(content, "Timeline Gaps", intFmt.format(q.gap_count || 0));
+
+  warnEl.textContent = "";
+  if (Array.isArray(q.warnings) && q.warnings.length > 0) {
+    const ul = document.createElement("ul");
+    ul.className = "validation-list validation-warnings";
+    for (const w of q.warnings) {
+      const li = document.createElement("li");
+      li.textContent = w;
+      ul.appendChild(li);
+    }
+    warnEl.appendChild(ul);
+  }
+}
+
+function renderPreviewTable(columns, previewRows) {
+  const thead = el("file-preview-thead");
+  const tbody = el("file-preview-tbody");
+  thead.textContent = "";
+  tbody.textContent = "";
+
+  if (!columns || columns.length === 0) {
+    const tr = document.createElement("tr");
+    const th = document.createElement("th");
+    th.textContent = "Preview";
+    tr.appendChild(th);
+    thead.appendChild(tr);
+    const bodyTr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.className = "muted-cell";
+    td.textContent = "Select a file to preview the first 10 rows.";
+    bodyTr.appendChild(td);
+    tbody.appendChild(bodyTr);
+    return;
+  }
+
+  const headTr = document.createElement("tr");
+  for (const col of columns) {
+    const th = document.createElement("th");
+    th.textContent = col;
+    headTr.appendChild(th);
+  }
+  thead.appendChild(headTr);
+
+  if (!previewRows || previewRows.length === 0) {
+    const bodyTr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = columns.length;
+    td.className = "muted-cell";
+    td.textContent = "File contains no preview rows.";
+    bodyTr.appendChild(td);
+    tbody.appendChild(bodyTr);
+    return;
+  }
+
+  for (const row of previewRows) {
+    const tr = document.createElement("tr");
+    for (const col of columns) {
+      const td = document.createElement("td");
+      const val = row[col];
+      td.textContent = val === null || val === undefined ? "NaN" : String(val);
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+}
+
+function renderWizardColumnChips(meta) {
+  const seriesBox = el("map-series-chips");
+  const covBox = el("map-covariates-chips");
+  seriesBox.textContent = "";
+  covBox.textContent = "";
+
+  const timeCol = el("map-time-select").value;
+  const targetCol = el("map-target-select").value;
+  const suggestedSeries = new Set(meta.suggested_series_cols || []);
+  const suggestedCovs = new Set(meta.suggested_covariates || []);
+  const covRoles = meta.suggested_covariate_roles || {};
+
+  const candidateCols = meta.columns.filter((c) => c !== timeCol && c !== targetCol);
+  if (candidateCols.length === 0) {
+    seriesBox.innerHTML = `<span class="muted-cell">No extra columns (single-series mode)</span>`;
+    covBox.innerHTML = `<span class="muted-cell">No covariate columns available</span>`;
+    return;
+  }
+
+  for (const col of candidateCols) {
+    const sLabel = document.createElement("label");
+    sLabel.className = "chip-check";
+    const sCb = document.createElement("input");
+    sCb.type = "checkbox";
+    sCb.value = col;
+    sCb.checked = suggestedSeries.has(col);
+    sCb.addEventListener("change", () => {
+      syncCovariateChipDisabledState();
+      clearWizardValidation();
+    });
+    const sSpan = document.createElement("span");
+    sSpan.textContent = col;
+    sLabel.appendChild(sCb);
+    sLabel.appendChild(sSpan);
+    seriesBox.appendChild(sLabel);
+
+    const cWrap = document.createElement("div");
+    cWrap.className = "cov-chip";
+    const cLabel = document.createElement("label");
+    cLabel.className = "chip-check";
+    cLabel.style.boxShadow = "none";
+    cLabel.style.padding = "0";
+    const cCb = document.createElement("input");
+    cCb.type = "checkbox";
+    cCb.value = col;
+    cCb.checked = suggestedCovs.has(col) && !suggestedSeries.has(col);
+    cCb.addEventListener("change", clearWizardValidation);
+    const cSpan = document.createElement("span");
+    cSpan.textContent = col;
+    cLabel.appendChild(cCb);
+    cLabel.appendChild(cSpan);
+
+    const roleSel = document.createElement("select");
+    roleSel.className = "cov-role-select";
+    roleSel.setAttribute("aria-label", `Covariate role for ${col}`);
+    roleSel.appendChild(new Option("past-only", "past-only"));
+    roleSel.appendChild(new Option("known-future", "known-future"));
+    roleSel.value = covRoles[col] || "past-only";
+    roleSel.addEventListener("change", clearWizardValidation);
+
+    cWrap.appendChild(cLabel);
+    cWrap.appendChild(roleSel);
+    covBox.appendChild(cWrap);
+  }
+  syncCovariateChipDisabledState();
+}
+
+function syncCovariateChipDisabledState() {
+  const selectedSeries = new Set(getSelectedSeriesCols());
+  for (const wrap of el("map-covariates-chips").querySelectorAll(".cov-chip")) {
+    const cb = wrap.querySelector('input[type="checkbox"]');
+    const sel = wrap.querySelector("select");
+    if (!cb) continue;
+    const isSeries = selectedSeries.has(cb.value);
+    if (isSeries) cb.checked = false;
+    cb.disabled = isSeries;
+    if (sel) sel.disabled = isSeries;
+  }
+}
+
+function getSelectedSeriesCols() {
+  return Array.from(el("map-series-chips").querySelectorAll('input[type="checkbox"]:checked')).map((cb) => cb.value);
+}
+
+function getSelectedCovariates() {
+  const out = [];
+  for (const wrap of el("map-covariates-chips").querySelectorAll(".cov-chip")) {
+    const cb = wrap.querySelector('input[type="checkbox"]');
+    const sel = wrap.querySelector("select");
+    if (cb && cb.checked && !cb.disabled) {
+      out.push({ name: cb.value, role: sel ? sel.value : "past-only" });
+    }
+  }
+  return out;
+}
+
+function clearWizardValidation() {
+  state.wizardValidation = null;
+  const panel = el("wiz-validation-panel");
+  if (panel) panel.hidden = true;
+  if (state.selectedFile) el("wiz-submit-btn").disabled = false;
+}
+
+function renderValidationReport(rep) {
+  state.wizardValidation = rep;
+  const panel = el("wiz-validation-panel");
+  const errBox = el("wiz-val-errors");
+  const warnBox = el("wiz-val-warnings");
+  const metricsBox = el("wiz-val-metrics");
+  panel.hidden = false;
+
+  errBox.textContent = "";
+  if (rep.errors && rep.errors.length > 0) {
+    errBox.hidden = false;
+    const ul = document.createElement("ul");
+    ul.className = "validation-list validation-errors";
+    for (const e of rep.errors) {
+      const li = document.createElement("li");
+      li.textContent = e;
+      ul.appendChild(li);
+    }
+    errBox.appendChild(ul);
+  } else {
+    errBox.hidden = true;
+  }
+
+  warnBox.textContent = "";
+  if (rep.warnings && rep.warnings.length > 0) {
+    warnBox.hidden = false;
+    const ul = document.createElement("ul");
+    ul.className = "validation-list validation-warnings";
+    for (const w of rep.warnings) {
+      const li = document.createElement("li");
+      li.textContent = w;
+      ul.appendChild(li);
+    }
+    warnBox.appendChild(ul);
+  } else {
+    warnBox.hidden = true;
+  }
+
+  metricsBox.textContent = "";
+  appendDlItem(metricsBox, "Status", rep.quality_status || "-");
+  appendDlItem(metricsBox, "Rows", intFmt.format(rep.num_records || 0));
+  appendDlItem(metricsBox, "Series Count", intFmt.format(rep.num_series || 0));
+  appendDlItem(metricsBox, "Date Range", rep.date_start ? `${rep.date_start} to ${rep.date_end}` : "-");
+  appendDlItem(metricsBox, "Duplicate (Series, Date)", intFmt.format(rep.duplicate_count || 0));
+  appendDlItem(metricsBox, "Missing Days (Total)", intFmt.format(rep.missing_days_total || 0));
+  appendDlItem(metricsBox, "Target NaNs", intFmt.format(rep.missing_target_count || 0));
+  appendDlItem(metricsBox, "Negative Values", intFmt.format(rep.negative_sales_count || 0));
+  appendDlItem(metricsBox, "Zero-Sales Share", `${((rep.zero_sales_share || 0) * 100).toFixed(1)}%`);
+
+  const covNans = rep.covariate_nan_counts || {};
+  const covNanStr = Object.entries(covNans).map(([k, v]) => `${k}: ${v}`).join(", ") || "None selected";
+  appendDlItem(metricsBox, "Covariate NaNs", covNanStr);
+
+  el("wiz-submit-btn").disabled = !rep.valid;
+}
+
+function buildWizardFormData(includeDatasetName = true) {
+  const fd = new FormData();
+  fd.append("file", state.selectedFile);
+  if (includeDatasetName) fd.append("dataset_name", el("ds-name-input").value.trim());
+  fd.append("time_col", el("map-time-select").value);
+  fd.append("target_col", el("map-target-select").value);
+  fd.append("series_cols", getSelectedSeriesCols().join(","));
+  fd.append("covariates", JSON.stringify(getSelectedCovariates()));
+  fd.append("frequency", el("map-freq-select").value);
+  return fd;
 }
 
 function initDatasetWizard() {
   const dropZone = el("file-drop-zone");
   const fileInput = el("file-input");
 
-  dropZone.onclick = () => fileInput.click();
-  dropZone.ondragover = (e) => {
+  dropZone.addEventListener("click", () => fileInput.click());
+  dropZone.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      fileInput.click();
+    }
+  });
+  dropZone.addEventListener("dragover", (e) => {
     e.preventDefault();
     dropZone.classList.add("dragover");
-  };
-  dropZone.ondragleave = () => dropZone.classList.remove("dragover");
-  dropZone.ondrop = (e) => {
+  });
+  dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragover"));
+  dropZone.addEventListener("drop", (e) => {
     e.preventDefault();
     dropZone.classList.remove("dragover");
     if (e.dataTransfer.files.length > 0) handleFileSelected(e.dataTransfer.files[0]);
-  };
-  fileInput.onchange = (e) => {
+  });
+  fileInput.addEventListener("change", (e) => {
     if (e.target.files.length > 0) handleFileSelected(e.target.files[0]);
-  };
-  el("import-form").onsubmit = handleImportSubmit;
+  });
+
+  el("map-time-select").addEventListener("change", () => {
+    if (state.wizardMeta) renderWizardColumnChips(state.wizardMeta);
+    clearWizardValidation();
+  });
+  el("map-target-select").addEventListener("change", () => {
+    if (state.wizardMeta) renderWizardColumnChips(state.wizardMeta);
+    clearWizardValidation();
+  });
+  el("map-freq-select").addEventListener("change", clearWizardValidation);
+  el("wiz-validate-btn").addEventListener("click", handleValidateDataset);
+  el("import-form").addEventListener("submit", handleImportSubmit);
+  el("ds-refresh-btn").addEventListener("click", loadDatasetsView);
+  el("ds-delete-no").addEventListener("click", hideDatasetDeleteConfirm);
+  el("ds-delete-yes").addEventListener("click", async () => {
+    if (!state.pendingDeleteDatasetId) return;
+    try {
+      await api.deleteDataset(state.pendingDeleteDatasetId);
+      showAlert(`Deleted dataset '${state.pendingDeleteDatasetId}'.`, "success");
+      hideDatasetDeleteConfirm();
+      el("ds-quality-card").hidden = true;
+      await loadDatasetsView();
+    } catch (err) {
+      showAlert("Delete failed: " + err.message);
+    }
+  });
 }
 
 async function handleFileSelected(file) {
+  const lower = file.name.toLowerCase();
+  if (![".csv", ".xlsx", ".parquet"].some((ext) => lower.endsWith(ext))) {
+    showAlert("Unsupported file extension. Please choose a .csv, .xlsx, or .parquet file.");
+    return;
+  }
+
   state.selectedFile = file;
-  el("file-info-bar").hidden = false;
   el("file-name-lbl").textContent = file.name;
   el("file-size-lbl").textContent = `${(file.size / 1024).toFixed(1)} KB`;
+  el("file-shape-lbl").textContent = "Inspecting...";
+  el("wiz-progress-text").textContent = "Inspecting columns and preview...";
+  el("import-fieldset").disabled = true;
+  clearWizardValidation();
 
   const formData = new FormData();
   formData.append("file", file);
 
   try {
     const meta = await apiFetch("/api/datasets/inspect", { method: "POST", body: formData });
+    state.wizardMeta = meta;
+    el("file-shape-lbl").textContent = `${intFmt.format(meta.num_rows)} rows | ${meta.num_columns} columns`;
+
     const timeSelect = el("map-time-select");
     const targetSelect = el("map-target-select");
-    timeSelect.innerHTML = "";
-    targetSelect.innerHTML = "";
+    timeSelect.textContent = "";
+    targetSelect.textContent = "";
 
-    meta.columns.forEach((c) => {
+    for (const c of meta.columns) {
       timeSelect.appendChild(new Option(c, c, false, c === meta.suggested_time_col));
       targetSelect.appendChild(new Option(c, c, false, c === meta.suggested_target_col));
-    });
+    }
 
-    el("map-series-input").value = (meta.suggested_series_cols || []).join(", ");
-    el("map-covariates-input").value = (meta.suggested_covariates || []).join(", ");
-    el("ds-name-input").value = file.name.replace(/\.[^/.]+$/, "").replace(/_/g, " ");
-    el("import-form").hidden = false;
+    el("map-freq-select").value = meta.suggested_frequency || "D";
+    el("ds-name-input").value = file.name.replace(/\.[^/.]+$/, "").replace(/[_-]+/g, " ");
+    renderWizardColumnChips(meta);
+    renderPreviewTable(meta.columns, meta.sample_preview);
+    el("import-fieldset").disabled = false;
+    el("wiz-progress-text").textContent = "Review detected columns, then click Validate or Validate & Complete Import.";
   } catch (err) {
+    state.selectedFile = null;
+    state.wizardMeta = null;
+    el("file-shape-lbl").textContent = "Inspection failed";
+    el("wiz-progress-text").textContent = "";
+    renderPreviewTable([], []);
     showAlert("File inspection failed: " + err.message);
+  }
+}
+
+async function handleValidateDataset() {
+  if (!state.selectedFile) return null;
+  const valBtn = el("wiz-validate-btn");
+  valBtn.disabled = true;
+  el("wiz-progress-text").textContent = "Validating data quality...";
+
+  try {
+    const report = await apiFetch("/api/datasets/validate", {
+      method: "POST",
+      body: buildWizardFormData(false),
+    });
+    renderValidationReport(report);
+    el("wiz-progress-text").textContent = report.valid
+      ? "Validation passed. Ready to import."
+      : "Validation found blocking errors. Fix them before importing.";
+    return report;
+  } catch (err) {
+    el("wiz-progress-text").textContent = "";
+    showAlert("Validation failed: " + err.message);
+    return null;
+  } finally {
+    valBtn.disabled = false;
   }
 }
 
@@ -1000,28 +1512,26 @@ async function handleImportSubmit(e) {
   btn.disabled = true;
   spinner.hidden = false;
 
-  const formData = new FormData();
-  formData.append("file", state.selectedFile);
-  formData.append("dataset_name", el("ds-name-input").value);
-  formData.append("time_col", el("map-time-select").value);
-  formData.append("target_col", el("map-target-select").value);
-  formData.append("series_cols", el("map-series-input").value);
-  formData.append("covariates", el("map-covariates-input").value);
-  formData.append("frequency", el("map-freq-select").value);
-
   try {
-    const res = await apiFetch("/api/datasets/import", { method: "POST", body: formData });
+    const report = await handleValidateDataset();
+    if (!report || !report.valid) {
+      return;
+    }
+
+    el("wiz-progress-text").textContent = "Importing dataset to versioned Parquet store...";
+    const res = await apiFetch("/api/datasets/import", {
+      method: "POST",
+      body: buildWizardFormData(true),
+    });
+    el("wiz-progress-text").textContent = `Imported '${res.dataset_name}' (${res.version_id}) successfully.`;
     showAlert(`Dataset '${res.dataset_name}' (v${res.version_num}) imported successfully!`, "success");
-    el("import-form").reset();
-    el("import-form").hidden = true;
-    el("file-info-bar").hidden = true;
-    state.selectedFile = null;
     await loadDatasetsView();
   } catch (err) {
+    el("wiz-progress-text").textContent = "";
     showAlert("Import failed: " + err.message);
   } finally {
-    btn.disabled = false;
     spinner.hidden = true;
+    btn.disabled = Boolean(state.wizardValidation && !state.wizardValidation.valid);
   }
 }
 
@@ -1847,7 +2357,18 @@ function setupEvents() {
     renderChart(false);
   });
 
+  el("toggle-ma7").addEventListener("change", (e) => {
+    state.showMa7 = Boolean(e.target.checked);
+    renderChart(false);
+  });
+
   el("generate-btn").addEventListener("click", handleGenerateForecast);
+  el("retry-init-btn").addEventListener("click", () => {
+    state.loadingInitial = true;
+    state.error = "";
+    state.canRetryInit = false;
+    loadInitialForecastingData();
+  });
   el("run-eval-btn").addEventListener("click", handleRunEvaluation);
   el("download-csv-btn").addEventListener("click", (e) => {
     e.preventDefault();
@@ -1856,12 +2377,34 @@ function setupEvents() {
   });
 
   // Comparison events
-  el("cmp-horizon-group").addEventListener("click", (e) => {
-    const btn = e.target.closest("button[data-horizon]");
-    if (!btn) return;
-    el("cmp-horizon-group").querySelectorAll("button").forEach((b) => b.classList.remove("active"));
+  const cmpGroup = el("cmp-horizon-group");
+  function selectCmpHorizon(btn) {
+    cmpGroup.querySelectorAll("button[data-horizon]").forEach((b) => {
+      b.classList.remove("active");
+      b.setAttribute("aria-checked", "false");
+      b.tabIndex = -1;
+    });
     btn.classList.add("active");
+    btn.setAttribute("aria-checked", "true");
+    btn.tabIndex = 0;
     state.horizon = Number(btn.dataset.horizon);
+  }
+  cmpGroup.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-horizon]");
+    if (btn) selectCmpHorizon(btn);
+  });
+  cmpGroup.addEventListener("keydown", (e) => {
+    const buttons = Array.from(cmpGroup.querySelectorAll("button[data-horizon]"));
+    const idx = buttons.indexOf(document.activeElement);
+    if (idx === -1) return;
+    let nextIdx = -1;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") nextIdx = (idx + 1) % buttons.length;
+    else if (e.key === "ArrowLeft" || e.key === "ArrowUp") nextIdx = (idx - 1 + buttons.length) % buttons.length;
+    if (nextIdx !== -1) {
+      e.preventDefault();
+      buttons[nextIdx].focus();
+      selectCmpHorizon(buttons[nextIdx]);
+    }
   });
   el("cmp-run-btn").addEventListener("click", handleRunComparison);
 
@@ -1919,23 +2462,55 @@ function setupEvents() {
   window.addEventListener("resize", () => moveHorizonHighlight(true));
 }
 
+async function loadInitialForecastingData() {
+  state.loadingInitial = true;
+  state.error = "";
+  state.canRetryInit = false;
+  renderAll();
+
+  const [seriesRes, healthRes, datasetsRes] = await Promise.allSettled([
+    api.getSeries(),
+    api.getHealth(),
+    api.getDatasets(),
+  ]);
+
+  if (healthRes.status === "fulfilled") {
+    state.health = healthRes.value;
+    renderHealth();
+  } else if (el("device-pill")) {
+    el("device-pill").textContent = "Device unavailable";
+  }
+
+  if (datasetsRes.status === "fulfilled" && Array.isArray(datasetsRes.value) && datasetsRes.value.length > 0) {
+    const ds = datasetsRes.value[0];
+    state.activeDatasetLabel = `${ds.name} (v${ds.version_num})`;
+  }
+
+  if (seriesRes.status === "rejected") {
+    state.loadingInitial = false;
+    state.error = seriesRes.reason ? seriesRes.reason.message : "Failed to load products.";
+    state.canRetryInit = true;
+    const pSel = el("product-select");
+    const sSel = el("store-select");
+    pSel.textContent = "";
+    sSel.textContent = "";
+    pSel.appendChild(new Option("Error loading products", ""));
+    sSel.appendChild(new Option("Error loading stores", ""));
+    renderAll();
+    return;
+  }
+
+  state.seriesByProduct = buildProductStoreMap(seriesRes.value);
+  populateProducts();
+  populateStores();
+  state.loadingInitial = false;
+  await loadSelectedHistory();
+}
+
 async function init() {
   setupEvents();
   moveHorizonHighlight(true);
-  renderAll();
-
-  try {
-    const seriesIds = await api.getSeries();
-    state.seriesByProduct = buildProductStoreMap(seriesIds);
-    populateProducts();
-    populateStores();
-    state.loadingInitial = false;
-    await loadSelectedHistory();
-  } catch (err) {
-    state.loadingInitial = false;
-    state.error = err.message;
-    renderAll();
-  }
+  await loadInitialForecastingData();
 }
 
 document.addEventListener("DOMContentLoaded", init);

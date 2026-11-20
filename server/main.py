@@ -37,6 +37,7 @@ from rdf import config
 from rdf.baseline import forecast_seasonal_naive
 from rdf.data_loader import get_series as get_series_legacy, list_series as list_series_legacy, load_sales, series_summary
 from rdf.dataset_manager import (
+    delete_dataset,
     ensure_default_dataset,
     get_dataset_series_list,
     get_dataset_version,
@@ -44,6 +45,9 @@ from rdf.dataset_manager import (
     import_dataset,
     inspect_file,
     list_datasets,
+    read_raw_file,
+    sanitize_filename,
+    validate_dataset_frame,
 )
 from rdf.db import get_db, init_db, now_iso
 from rdf.evaluation import compute_metrics, generate_backtest_cutoffs
@@ -228,7 +232,95 @@ def api_forecast(req: ForecastRequest) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-# --- Universal Dataset Management Endpoints ---
+# --- Universal Dataset Management & Health Helpers ---
+
+ALLOWED_UPLOAD_EXTENSIONS = {".csv", ".xlsx", ".parquet"}
+
+
+def _device_health() -> dict[str, Any]:
+    chronos_loaded = getattr(app.state, "pipeline", None) is not None
+    raw_dev = getattr(app.state, "device", None)
+    chronos_device = raw_dev.upper() if (chronos_loaded and raw_dev) else "UNAVAILABLE"
+    custom_device = "CPU"
+    if not chronos_loaded:
+        device_label = f"Chronos-2: UNAVAILABLE | Custom: {custom_device}"
+    elif chronos_device != custom_device:
+        device_label = f"Chronos-2: {chronos_device} | Custom: {custom_device}"
+    else:
+        device_label = chronos_device
+    return {
+        "status": "ok",
+        "chronos_loaded": chronos_loaded,
+        "chronos_device": chronos_device,
+        "custom_device": custom_device,
+        "device_label": device_label,
+        "model_id": config.MODEL_ID,
+    }
+
+
+async def _save_validated_upload(file: UploadFile) -> tuple[Path, str]:
+    try:
+        safe_name = sanitize_filename(file.filename or "")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    suffix = Path(safe_name).suffix.lower()
+    if suffix not in ALLOWED_UPLOAD_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported format '{suffix or 'unknown'}'. Allowed extensions: .csv, .xlsx, .parquet.",
+        )
+
+    max_bytes = int(getattr(app.state, "max_upload_bytes", config.MAX_UPLOAD_BYTES))
+    tmp_path: Path | None = None
+    total_bytes = 0
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp_path = Path(tmp.name)
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total_bytes += len(chunk)
+                if total_bytes > max_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File exceeds maximum allowed size ({max_bytes // (1024 * 1024) or 1} MB / {max_bytes:,} bytes).",
+                    )
+                tmp.write(chunk)
+
+        if total_bytes == 0:
+            raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+        return tmp_path, safe_name
+    except HTTPException:
+        if tmp_path and tmp_path.exists():
+            tmp_path.unlink()
+        raise
+    except Exception as e:
+        if tmp_path and tmp_path.exists():
+            tmp_path.unlink()
+        raise HTTPException(status_code=400, detail=f"Failed to read uploaded file: {e}") from e
+
+
+def _parse_covariates_field(raw_cov: str) -> list[Any]:
+    text = (raw_cov or "").strip()
+    if not text:
+        return []
+    if text.startswith("["):
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, list):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+    return [c.strip() for c in text.split(",") if c.strip()]
+
+
+@app.get("/api/health")
+def api_health() -> dict[str, Any]:
+    """Single source of truth for model engine availability and compute devices."""
+    return _device_health()
+
 
 @app.get("/api/datasets")
 def api_list_datasets() -> list[dict[str, Any]]:
@@ -245,22 +337,57 @@ def api_get_dataset(dataset_id: str) -> dict[str, Any]:
     return v_info
 
 
+@app.delete("/api/datasets/{dataset_id}")
+def api_delete_dataset(dataset_id: str) -> dict[str, Any]:
+    """Delete a dataset, its versions, and stored files."""
+    res = delete_dataset(dataset_id)
+    if not res:
+        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found.")
+    return res
+
+
 @app.post("/api/datasets/inspect")
 async def api_inspect_dataset(file: UploadFile = File(...)) -> dict[str, Any]:
     """Inspect an uploaded CSV/XLSX/Parquet file and suggest column mappings."""
-    suffix = Path(file.filename or "data.csv").suffix.lower()
-    if suffix not in (".csv", ".txt", ".xlsx", ".xls", ".parquet", ".pq"):
-        raise HTTPException(status_code=400, detail=f"Unsupported format '{suffix}'. Use CSV, XLSX, or Parquet.")
-
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        shutil.copyfileobj(file.file, tmp)
-        tmp_path = Path(tmp.name)
-
+    tmp_path, safe_name = await _save_validated_upload(file)
     try:
-        meta = inspect_file(tmp_path)
-        return meta
+        return inspect_file(tmp_path, display_name=safe_name)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to inspect file: {e}") from e
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink()
+
+
+@app.post("/api/datasets/validate")
+async def api_validate_dataset(
+    file: UploadFile = File(...),
+    time_col: str = Form(...),
+    target_col: str = Form(...),
+    series_cols: str = Form(""),
+    covariates: str = Form(""),
+    frequency: str = Form("D"),
+) -> dict[str, Any]:
+    """Validate column mappings and data quality before importing."""
+    tmp_path, _safe_name = await _save_validated_upload(file)
+    sc_list = [c.strip() for c in series_cols.split(",") if c.strip()] if series_cols else []
+    cov_list = _parse_covariates_field(covariates)
+    try:
+        raw_df = read_raw_file(tmp_path)
+        return validate_dataset_frame(
+            raw_df,
+            time_col=time_col,
+            target_col=target_col,
+            series_cols=sc_list,
+            covariates=cov_list,
+            frequency=frequency,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Validation failed: {e}") from e
     finally:
         if tmp_path.exists():
             tmp_path.unlink()
@@ -278,16 +405,12 @@ async def api_import_dataset(
     description: str = Form(""),
 ) -> dict[str, Any]:
     """Upload, validate, standardize, and store a new dataset version."""
-    suffix = Path(file.filename or "data.csv").suffix.lower()
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        shutil.copyfileobj(file.file, tmp)
-        tmp_path = Path(tmp.name)
-
+    tmp_path, safe_name = await _save_validated_upload(file)
     sc_list = [c.strip() for c in series_cols.split(",") if c.strip()] if series_cols else []
-    cov_list = [c.strip() for c in covariates.split(",") if c.strip()] if covariates else []
+    cov_list = _parse_covariates_field(covariates)
 
     try:
-        res = import_dataset(
+        return import_dataset(
             file_path=tmp_path,
             dataset_name=dataset_name,
             time_col=time_col,
@@ -296,8 +419,9 @@ async def api_import_dataset(
             covariates=cov_list,
             frequency=frequency,
             description=description,
+            strict=True,
+            original_filename=safe_name,
         )
-        return res
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Dataset import failed: {e}") from e
     finally:
@@ -572,6 +696,7 @@ def api_overview() -> dict[str, Any]:
             "SELECT id, dataset_id, series_id, model_type, horizon, created_at FROM forecast_runs ORDER BY created_at DESC LIMIT 5"
         ).fetchall()
 
+    health = _device_health()
     return {
         "total_datasets": ds_count,
         "total_records": v_row[0] or 0,
@@ -579,8 +704,11 @@ def api_overview() -> dict[str, Any]:
         "total_models": model_count,
         "total_forecasts": run_count,
         "recent_runs": [dict(r) for r in recent_runs],
-        "chronos_status": "LOADED" if app.state.pipeline else "UNAVAILABLE",
-        "device": app.state.device or "CPU",
+        "chronos_status": "LOADED" if health["chronos_loaded"] else "UNAVAILABLE",
+        "chronos_device": health["chronos_device"],
+        "custom_device": health["custom_device"],
+        "device_label": health["device_label"],
+        "device": health["device_label"],
     }
 
 

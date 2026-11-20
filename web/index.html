@@ -7,9 +7,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=5">
+  <link rel="stylesheet" href="style.css?v=6">
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" defer></script>
-  <script type="module" src="app.js?v=5"></script>
+  <script type="module" src="app.js?v=6"></script>
 </head>
 <body>
   <div class="page">
@@ -17,7 +17,7 @@
       <h1>Retail Product Demand Forecasting</h1>
       <div class="topbar-pills">
         <span class="pill">Forecasts by Amazon Chronos-2 &amp; Custom Model</span>
-        <span id="device-pill" class="pill pill-device">CPU</span>
+        <span id="device-pill" class="pill pill-device">Checking device...</span>
       </div>
     </header>
 
@@ -72,7 +72,7 @@
 
             <div class="field">
               <span id="horizon-label" class="section-label">Horizon (days)</span>
-              <div id="horizon-group" class="segmented" role="radiogroup" aria-labelledby="horizon-label">
+              <div id="horizon-group" class="segmented segmented-with-highlight" role="radiogroup" aria-labelledby="horizon-label">
                 <span id="horizon-highlight" class="segmented-highlight" aria-hidden="true"></span>
                 <button type="button" role="radio" aria-checked="false" data-horizon="7" tabindex="-1">7</button>
                 <button type="button" role="radio" aria-checked="false" data-horizon="14" tabindex="-1">14</button>
@@ -95,28 +95,31 @@
           <p id="data-summary" class="summary-line">Loading products...</p>
           <p id="loading-text" class="loading-text" hidden>Running forecast inference...</p>
           <p id="empty-hint" class="empty-hint">Select a product and click Generate Forecast</p>
-          <div id="error-banner" class="error-banner" role="alert" hidden></div>
+          <div id="error-banner" class="error-banner" role="alert" hidden>
+            <span id="error-text"></span>
+            <button type="button" id="retry-init-btn" class="btn-secondary" hidden>Retry</button>
+          </div>
         </div>
 
         <section class="kpi-row" aria-label="Forecast summary">
           <div class="panel kpi-block">
             <div id="kpi-total-label" class="section-label">Total predicted demand (28 days)</div>
             <div class="kpi-value-row">
-              <span id="kpi-total-value" class="kpi-value">-</span>
-              <span id="kpi-total-unit" class="kpi-unit" hidden>units</span>
+              <span id="kpi-total-value" class="kpi-value kpi-placeholder">Click Generate Forecast</span>
+              <span id="kpi-total-unit" class="kpi-unit" hidden>units (expected)</span>
             </div>
           </div>
           <div class="panel kpi-block">
             <div class="section-label">Average daily predicted demand</div>
             <div class="kpi-value-row">
-              <span id="kpi-avg-value" class="kpi-value">-</span>
-              <span id="kpi-avg-unit" class="kpi-unit" hidden>units/day</span>
+              <span id="kpi-avg-value" class="kpi-value kpi-placeholder">Click Generate Forecast</span>
+              <span id="kpi-avg-unit" class="kpi-unit" hidden>units/day (expected)</span>
             </div>
           </div>
           <div class="panel kpi-block">
             <div id="kpi-change-label" class="section-label">vs previous 28 days</div>
             <div class="kpi-value-row">
-              <span id="kpi-change-value" class="kpi-value">-</span>
+              <span id="kpi-change-value" class="kpi-value kpi-placeholder">Compared after forecast</span>
             </div>
           </div>
         </section>
@@ -138,12 +141,18 @@
               </div>
             </div>
 
-            <div id="range-group" class="range-buttons" role="group" aria-label="Chart zoom range">
-              <button type="button" class="range-btn" data-range="1M">1M</button>
-              <button type="button" class="range-btn" data-range="3M">3M</button>
-              <button type="button" class="range-btn" data-range="6M">6M</button>
-              <button type="button" class="range-btn" data-range="1Y">1Y</button>
-              <button type="button" class="range-btn" data-range="ALL" aria-pressed="true">All</button>
+            <div class="chart-controls-right">
+              <label class="toggle-inline">
+                <input type="checkbox" id="toggle-ma7">
+                <span>7-day average</span>
+              </label>
+              <div id="range-group" class="range-buttons" role="group" aria-label="Chart zoom range">
+                <button type="button" class="range-btn" data-range="1M">1M</button>
+                <button type="button" class="range-btn" data-range="3M">3M</button>
+                <button type="button" class="range-btn" data-range="6M">6M</button>
+                <button type="button" class="range-btn" data-range="1Y" aria-pressed="true">1Y</button>
+                <button type="button" class="range-btn" data-range="ALL">All</button>
+              </div>
             </div>
           </div>
 
@@ -278,9 +287,9 @@
               <span class="mono-sub">Chronos-2, Custom, Baseline</span>
             </div>
             <div class="mono-box">
-              <span class="mono-lbl">RUNTIME_DEVICE</span>
-              <strong id="ov-device" class="mono-val">CPU (INTEL/AMD)</strong>
-              <span class="mono-sub">Hardware Acceleration</span>
+              <span class="mono-lbl">RUNTIME_DEVICES</span>
+              <strong id="ov-device" class="mono-val">-</strong>
+              <span class="mono-sub">Single Health Source</span>
             </div>
           </div>
         </div>
@@ -415,7 +424,7 @@
             <div class="field" style="margin-bottom: var(--sp-3);">
               <label for="train-lags" style="font-size:12px; font-weight:600; color:var(--text); display:block; margin-bottom:4px;">Lag Observation Windows (comma-separated)</label>
               <input type="text" id="train-lags" value="1, 2, 3, 7, 14, 28, 56" />
-              <span style="font-size:11px; color:var(--muted); display:block; margin-top:4px;">No future leakage: strictly historical observations ($t-k$).</span>
+              <span style="font-size:11px; color:var(--muted); display:block; margin-top:4px;">No future leakage: strictly historical observations (t-k).</span>
             </div>
 
             <div class="field" style="margin-bottom: var(--sp-3);">
@@ -581,12 +590,12 @@
             </div>
 
             <div class="field">
-              <span class="section-label">Horizon (days)</span>
-              <div id="cmp-horizon-group" class="segmented">
-                <button type="button" data-horizon="7">7</button>
-                <button type="button" data-horizon="14">14</button>
-                <button type="button" data-horizon="28" class="active">28</button>
-                <button type="button" data-horizon="56">56</button>
+              <span id="cmp-horizon-label" class="section-label">Horizon (days)</span>
+              <div id="cmp-horizon-group" class="segmented" role="radiogroup" aria-labelledby="cmp-horizon-label">
+                <button type="button" role="radio" aria-checked="false" data-horizon="7" tabindex="-1">7</button>
+                <button type="button" role="radio" aria-checked="false" data-horizon="14" tabindex="-1">14</button>
+                <button type="button" role="radio" aria-checked="true" data-horizon="28" class="active" tabindex="0">28</button>
+                <button type="button" role="radio" aria-checked="false" data-horizon="56" tabindex="-1">56</button>
               </div>
             </div>
 
@@ -616,17 +625,14 @@
         <section class="panel chart-panel">
           <div class="chart-header">
             <span class="section-label">Multi-Model Demand Comparison Chart</span>
-            <div class="topbar-pills">
-              <span class="pill" style="color: #2563EB;">Chronos-2 (Zero-Shot)</span>
-              <span class="pill" style="color: #C2571A;">Custom Model</span>
-              <span class="pill" style="color: #6B7280;">Seasonal Baseline</span>
-            </div>
+            <div id="cmp-interval-toggles" class="interval-toggles" aria-label="Toggle 80% prediction intervals"></div>
           </div>
           <div id="cmp-chart" class="chart-container"></div>
         </section>
 
-        <section class="panel">
+        <section class="panel archive-panel">
           <h3 class="section-label">Comparative Accuracy &amp; Performance Metrics</h3>
+          <p class="metrics-subtitle">Point metrics (MAE, RMSE, WAPE, MASE, Bias) evaluate each engine's median (q50) forecast.</p>
           <div class="table-wrap">
             <table>
               <thead>
@@ -648,6 +654,7 @@
               </tbody>
             </table>
           </div>
+          <p class="metrics-footnote">Definitions: MAE = mean |error|; RMSE = root mean squared error; WAPE = sum |error| / sum actual; MASE = MAE relative to seasonal naive error; Bias = (sum forecast - sum actual) / sum actual; Pinball Loss = quantile loss at q50; 80% Coverage = share of actuals inside [q10, q90]; Mean Width = average (q90 - q10).</p>
         </section>
       </section>
 
@@ -655,93 +662,143 @@
       <section id="view-datasets" class="view-panel">
         <div class="panel controls-panel">
           <h3 class="section-label">Import Dataset Wizard</h3>
-          <div class="file-drop-area" id="file-drop-zone">
-            <input type="file" id="file-input" accept=".csv,.xlsx,.xls,.parquet,.pq" class="file-input-hidden">
+          <div class="file-drop-area" id="file-drop-zone" role="button" tabindex="0" aria-label="Upload retail dataset file (.csv, .xlsx, .parquet)">
+            <input type="file" id="file-input" accept=".csv,.xlsx,.parquet" class="file-input-hidden">
             <div class="drop-prompt">
-              <span class="drop-icon">&#128193;</span>
-              <strong>Drag &amp; drop retail dataset file here</strong>
-              <span>or click to browse (CSV, Excel XLSX, Parquet)</span>
+              <strong>Drag and drop a dataset file here</strong>
+              <span>or click / press Enter to browse (.csv, .xlsx, .parquet &mdash; max 100 MB)</span>
             </div>
           </div>
-          <div id="file-info-bar" class="file-info" hidden>
-            <span id="file-name-lbl">-</span>
+
+          <div id="file-info-bar" class="file-info" aria-live="polite">
+            <span id="file-name-lbl">No file selected</span>
             <span id="file-size-lbl">-</span>
+            <span id="file-shape-lbl">-</span>
           </div>
 
-          <form id="import-form" class="form-grid mt-16" hidden>
-            <div class="field full-width">
-              <label for="ds-name-input" class="section-label">Dataset Name</label>
-              <input type="text" id="ds-name-input" required placeholder="e.g. Supermarket Sales History">
+          <div id="file-preview-section" class="wizard-preview">
+            <h4 class="section-label">Data Preview (First 10 Rows)</h4>
+            <div class="table-wrap">
+              <table>
+                <thead id="file-preview-thead">
+                  <tr><th>Preview</th></tr>
+                </thead>
+                <tbody id="file-preview-tbody">
+                  <tr><td class="muted-cell">Select a file to preview the first 10 rows.</td></tr>
+                </tbody>
+              </table>
             </div>
+          </div>
 
-            <div class="field">
-              <label for="map-time-select" class="section-label">Date / Timestamp Column</label>
-              <div class="select-wrap">
-                <select id="map-time-select" required></select>
+          <form id="import-form">
+            <fieldset id="import-fieldset" class="wizard-fieldset" disabled>
+              <div class="form-grid">
+                <div class="field full-width">
+                  <label for="ds-name-input" class="section-label">Dataset Name</label>
+                  <input type="text" id="ds-name-input" required placeholder="e.g. Supermarket Sales History">
+                </div>
+
+                <div class="field">
+                  <label for="map-time-select" class="section-label">Date / Timestamp Column</label>
+                  <div class="select-wrap">
+                    <select id="map-time-select" required>
+                      <option value="">Select a file first...</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="field">
+                  <label for="map-target-select" class="section-label">Target Demand / Sales Column</label>
+                  <div class="select-wrap">
+                    <select id="map-target-select" required>
+                      <option value="">Select a file first...</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="field">
+                  <label for="map-freq-select" class="section-label">Frequency</label>
+                  <div class="select-wrap">
+                    <select id="map-freq-select">
+                      <option value="D">Daily (D)</option>
+                      <option value="W">Weekly (W)</option>
+                      <option value="M">Monthly (M)</option>
+                      <option value="H">Hourly (H)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="field">
+                  <span class="section-label">Series Identifier Columns (Optional)</span>
+                  <div id="map-series-chips" class="chip-list" aria-label="Series identifier columns">
+                    <span class="muted-cell">No columns detected yet</span>
+                  </div>
+                </div>
+
+                <div class="field full-width">
+                  <span class="section-label">Optional Covariates (Select and assign role)</span>
+                  <div id="map-covariates-chips" class="chip-list" aria-label="Covariate columns and roles">
+                    <span class="muted-cell">No columns detected yet</span>
+                  </div>
+                </div>
+
+                <div class="field full-width wizard-actions">
+                  <button type="button" id="wiz-validate-btn" class="btn-secondary">Validate</button>
+                  <button type="submit" id="wiz-submit-btn" class="btn-primary">
+                    <span id="wiz-spinner" class="spinner" hidden></span>
+                    <span>Validate &amp; Complete Import</span>
+                  </button>
+                  <span id="wiz-progress-text" class="summary-line" aria-live="polite"></span>
+                </div>
               </div>
-            </div>
-
-            <div class="field">
-              <label for="map-target-select" class="section-label">Target Demand / Sales Column</label>
-              <div class="select-wrap">
-                <select id="map-target-select" required></select>
-              </div>
-            </div>
-
-            <div class="field full-width">
-              <label for="map-series-input" class="section-label">Series Identifier Columns (Optional)</label>
-              <input type="text" id="map-series-input" placeholder="e.g. item_id, store_id (leave empty for single-series)">
-            </div>
-
-            <div class="field">
-              <label for="map-freq-select" class="section-label">Frequency</label>
-              <div class="select-wrap">
-                <select id="map-freq-select">
-                  <option value="D">Daily (D)</option>
-                  <option value="W">Weekly (W)</option>
-                  <option value="M">Monthly (M)</option>
-                  <option value="H">Hourly (H)</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="field">
-              <label for="map-covariates-input" class="section-label">Optional Covariates</label>
-              <input type="text" id="map-covariates-input" placeholder="e.g. is_promotion, price">
-            </div>
-
-            <div class="field full-width">
-              <button type="submit" id="wiz-submit-btn" class="btn-primary">
-                <span id="wiz-spinner" class="spinner" hidden></span>
-                <span>Validate &amp; Complete Import</span>
-              </button>
-            </div>
+            </fieldset>
           </form>
+
+          <div id="wiz-validation-panel" class="validation-panel" aria-live="polite" hidden>
+            <h4 class="section-label">Pre-Import Validation Report</h4>
+            <div id="wiz-val-errors" hidden></div>
+            <div id="wiz-val-warnings" hidden></div>
+            <div id="wiz-val-metrics" class="modal-meta-grid"></div>
+          </div>
         </div>
 
-        <section class="panel mt-20">
-          <h3 class="section-label">Imported Datasets Archive</h3>
+        <section class="panel archive-panel mt-20">
+          <div class="chart-header">
+            <h3 class="section-label">Imported Datasets Archive</h3>
+            <button type="button" id="ds-refresh-btn" class="btn-secondary">Refresh</button>
+          </div>
+
+          <div id="ds-delete-confirm" class="confirm-strip" role="alert" hidden>
+            <span id="ds-delete-msg">Delete this dataset?</span>
+            <div class="confirm-strip-actions">
+              <button type="button" id="ds-delete-yes" class="btn-danger">Confirm Delete</button>
+              <button type="button" id="ds-delete-no" class="btn-secondary">Cancel</button>
+            </div>
+          </div>
+
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Dataset Name</th>
+                  <th>Dataset Name &amp; Slug</th>
                   <th>Version</th>
                   <th class="num">Records</th>
                   <th class="num">Series</th>
                   <th>Date Coverage</th>
                   <th>Status</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody id="ds-list-tbody">
-                <tr><td colspan="6" class="muted-cell">Loading datasets...</td></tr>
+                <tr><td colspan="7" class="muted-cell">Loading datasets...</td></tr>
               </tbody>
             </table>
           </div>
 
-          <div id="ds-quality-card" class="mt-16" hidden>
-            <h4 class="section-label">Data Quality Report</h4>
-            <div id="ds-quality-content" class="about-grid"></div>
+          <div id="ds-quality-card" class="quality-panel mt-16" hidden>
+            <h4 id="ds-quality-title" class="section-label">Data Quality Report</h4>
+            <dl id="ds-quality-content" class="modal-meta-grid"></dl>
+            <div id="ds-quality-warnings" class="mt-12"></div>
           </div>
         </section>
       </section>
