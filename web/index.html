@@ -23,8 +23,9 @@
 
     <!-- Neumorphic Navigation Tabs -->
     <nav class="main-nav" aria-label="Main Navigation">
-      <button type="button" class="nav-tab active" data-tab="forecasting">Forecasting</button>
       <button type="button" class="nav-tab" data-tab="overview">Overview</button>
+      <button type="button" class="nav-tab active" data-tab="forecasting">Forecasting</button>
+      <button type="button" class="nav-tab" data-tab="inventory">Inventory &amp; Reorder</button>
       <button type="button" class="nav-tab" data-tab="training">Model Training</button>
       <button type="button" class="nav-tab" data-tab="comparison">Model Comparison</button>
       <button type="button" class="nav-tab" data-tab="datasets">Data Management</button>
@@ -166,7 +167,10 @@
         <details id="eval-section" class="panel details-panel" open>
           <summary class="details-summary">
             <span>Model Evaluation &amp; Accuracy Metrics</span>
-            <button id="run-eval-btn" type="button" class="btn-secondary">Evaluate on Historical Context</button>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button id="calibrate-btn" type="button" class="btn-secondary">Calibrate 80% Interval</button>
+              <button id="run-eval-btn" type="button" class="btn-secondary">Evaluate on Historical Context</button>
+            </div>
           </summary>
           <div class="eval-content-wrap">
             <div class="eval-metrics-grid">
@@ -254,9 +258,21 @@
               <dt>Input</dt>
               <dd>Full daily sales history of the selected product-store</dd>
             </div>
+            <div id="about-calibration-wrap">
+              <dt>80% Interval Calibration</dt>
+              <dd id="about-calibration">Uncalibrated (k = 1.00)</dd>
+            </div>
           </dl>
           <p class="about-note">Daily line shows median prediction (50th percentile); totals and daily average use expected demand approximated from 0.05-0.95 quantiles. Negative values are clipped to zero.</p>
         </section>
+      </section>
+
+      <!-- ================= INVENTORY & REORDER (STAGE 1 PLACEHOLDER) ================= -->
+      <section id="view-inventory" class="view-panel">
+        <div class="panel">
+          <h2 class="section-label">Inventory &amp; Reorder</h2>
+          <p class="panel-subtitle">Stage 1: Replenishment recommendations using calibrated forecasts and lead-time uncertainty (coming next).</p>
+        </div>
       </section>
 
       <!-- ================= 2. OVERVIEW LANDING PAGE (MONOSPHERE UI) ================= -->

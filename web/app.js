@@ -13,6 +13,7 @@ const state = {
   health: null,
   history: null,
   forecast: null,
+  calibration: null,
   evalMetrics: null,
   lastComparison: null,
   cmpIntervalEngines: new Set(),
@@ -114,6 +115,14 @@ const api = {
   getHealth: () => apiFetch("/api/health"),
   getSeries: () => apiFetch("/api/series"),
   getHistory: (seriesId) => apiFetch(`/api/history?series_id=${encodeURIComponent(seriesId)}`),
+  getCalibration: (seriesId, modelType) =>
+    apiFetch(`/api/calibration?series_id=${encodeURIComponent(seriesId)}&model_type=${encodeURIComponent(modelType)}`),
+  runCalibration: (seriesId, modelType, horizon) =>
+    apiFetch("/api/calibration/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ series_id: seriesId, model_type: modelType, horizon }),
+    }),
   postForecast: (seriesId, horizon, modelType) =>
     apiFetch("/api/forecast", {
       method: "POST",
@@ -624,6 +633,18 @@ function renderAbout() {
   } else {
     el("about-device").textContent = "-";
   }
+
+  const aboutCal = el("about-calibration");
+  if (aboutCal) {
+    const cal = (state.forecast && state.forecast.calibration) || state.calibration;
+    if (cal && cal.calibrated) {
+      const rawPct = cal.raw_coverage_80 != null ? `${(cal.raw_coverage_80 * 100).toFixed(1)}%` : "-";
+      const calPct = cal.calibrated_coverage_80 != null ? `${(cal.calibrated_coverage_80 * 100).toFixed(1)}%` : "-";
+      aboutCal.textContent = `Calibrated (k = ${Number(cal.scale_k).toFixed(2)}, Val Cov80: ${rawPct} -> ${calPct})`;
+    } else {
+      aboutCal.textContent = "Uncalibrated (k = 1.00)";
+    }
+  }
 }
 
 function renderAll(options = {}) {
@@ -704,17 +725,47 @@ async function loadSelectedHistory() {
   if (!state.selectedProduct || !state.selectedStore) return;
   cancelAnimations();
   state.forecast = null;
+  state.calibration = null;
   state.rangeKey = "1Y";
   state.error = "";
   renderAll();
 
   try {
-    state.history = await api.getHistory(currentSeriesId());
+    const sid = currentSeriesId();
+    const [hist, cal] = await Promise.all([
+      api.getHistory(sid),
+      api.getCalibration(sid, state.selectedModel).catch(() => null),
+    ]);
+    state.history = hist;
+    state.calibration = cal;
   } catch (err) {
     state.history = null;
     state.error = err.message;
   }
   renderAll();
+}
+
+async function handleRunCalibration() {
+  if (!state.selectedProduct || !state.selectedStore) return;
+  const btn = el("calibrate-btn");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Calibrating...";
+  }
+  state.error = "";
+  try {
+    const res = await api.runCalibration(currentSeriesId(), state.selectedModel, state.horizon);
+    state.calibration = res;
+    renderAbout();
+  } catch (err) {
+    state.error = `Calibration failed: ${err.message}`;
+    renderStatus();
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Calibrate 80% Interval";
+    }
+  }
 }
 
 async function handleGenerateForecast() {
@@ -730,6 +781,9 @@ async function handleGenerateForecast() {
     const res = await api.postForecast(currentSeriesId(), state.horizon, state.selectedModel);
     if (state.animToken !== token) return;
     state.forecast = res;
+    if (res && res.calibration) {
+      state.calibration = res.calibration;
+    }
     state.rangeKey = "6M";
   } catch (err) {
     state.forecast = null;
@@ -2370,6 +2424,8 @@ function setupEvents() {
     loadInitialForecastingData();
   });
   el("run-eval-btn").addEventListener("click", handleRunEvaluation);
+  const calibrateBtn = el("calibrate-btn");
+  if (calibrateBtn) calibrateBtn.addEventListener("click", handleRunCalibration);
   el("download-csv-btn").addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();

@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 
 from .baseline import forecast_seasonal_naive
+from .calibration import apply_interval_calibration, get_series_calibration
 from .config import CONTEXT_LENGTH, DATA_DIR, MODEL_ID
 from .data_loader import get_series as get_series_legacy
 from .dataset_manager import get_dataset_version, get_series_history
@@ -210,9 +211,18 @@ def generate_single_forecast(
     dates = [pd.Timestamp(d).strftime("%Y-%m-%d") for d in res_df["date"]]
     median_vals = [float(v) for v in res_df["median"]]
     expected_vals = [float(v) for v in res_df.get("expected", res_df["median"])]
-    q10_vals = [float(v) for v in res_df["q10"]]
+    raw_q10_vals = [float(v) for v in res_df["q10"]]
     q50_vals = [float(v) for v in res_df["q50"]]
-    q90_vals = [float(v) for v in res_df["q90"]]
+    raw_q90_vals = [float(v) for v in res_df["q90"]]
+
+    cal_info = get_series_calibration(series_id, model_type_clean, dataset_id)
+    if cal_info is None and dataset_id != "retail-demand-m5":
+        cal_info = get_series_calibration(series_id, model_type_clean, "retail-demand-m5")
+
+    if cal_info is not None:
+        q10_vals, q90_vals = apply_interval_calibration(median_vals, raw_q10_vals, raw_q90_vals, cal_info["scale_k"])
+    else:
+        q10_vals, q90_vals = raw_q10_vals, raw_q90_vals
 
     total_pred = float(np.sum(expected_vals))
     daily_avg = float(np.mean(expected_vals))
@@ -268,6 +278,15 @@ def generate_single_forecast(
         "q10": q10_vals,
         "q50": q50_vals,
         "q90": q90_vals,
+        "raw_q10": raw_q10_vals,
+        "raw_q90": raw_q90_vals,
+        "calibration": {
+            "calibrated": cal_info is not None,
+            "scale_k": cal_info["scale_k"] if cal_info else 1.0,
+            "raw_coverage_80": cal_info["raw_coverage_80"] if cal_info else None,
+            "calibrated_coverage_80": cal_info["calibrated_coverage_80"] if cal_info else None,
+            "sigma_d": cal_info["sigma_d"] if cal_info else None,
+        },
         "total": total_pred,
         "daily_average": daily_avg,
         "device": device,

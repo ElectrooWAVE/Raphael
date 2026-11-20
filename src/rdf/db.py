@@ -159,6 +159,24 @@ def init_db(db_path: Path = DB_PATH) -> None:
         CREATE INDEX IF NOT EXISTS idx_fr_created_at ON forecast_runs(created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_fv_run ON forecast_values(forecast_run_id);
         CREATE INDEX IF NOT EXISTS idx_er_run ON evaluation_results(evaluation_run_id);
+
+        CREATE TABLE IF NOT EXISTS series_calibration (
+            series_id TEXT NOT NULL,
+            model_type TEXT NOT NULL,
+            dataset_id TEXT NOT NULL DEFAULT 'retail-demand-m5',
+            horizon INTEGER NOT NULL DEFAULT 28,
+            scale_k REAL NOT NULL DEFAULT 1.0,
+            raw_coverage_80 REAL,
+            calibrated_coverage_80 REAL,
+            sigma_d REAL,
+            mae REAL,
+            wape REAL,
+            bias REAL,
+            sample_points INTEGER,
+            val_window_end TEXT,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (series_id, model_type, dataset_id)
+        );
         """)
 
         existing_cols = {

@@ -35,6 +35,7 @@ from pydantic import BaseModel, Field
 
 from rdf import config
 from rdf.baseline import forecast_seasonal_naive
+from rdf.calibration import calibrate_series_validation, get_series_calibration
 from rdf.data_loader import get_series as get_series_legacy, list_series as list_series_legacy, load_sales, series_summary
 from rdf.dataset_manager import (
     delete_dataset,
@@ -75,6 +76,14 @@ class ForecastRequest(BaseModel):
     model_type: str = Field(default="chronos")
     model_id: Optional[str] = None
     dataset_id: Optional[str] = None
+
+
+class CalibrationRequest(BaseModel):
+    series_id: str = Field(..., min_length=1)
+    model_type: str = Field(default="chronos")
+    dataset_id: Optional[str] = None
+    horizon: int = Field(default=config.DEFAULT_HORIZON, ge=7, le=90)
+    num_cutoffs: int = Field(default=3, ge=1, le=5)
 
 
 class CompareRequest(BaseModel):
@@ -320,6 +329,53 @@ def _parse_covariates_field(raw_cov: str) -> list[Any]:
 def api_health() -> dict[str, Any]:
     """Single source of truth for model engine availability and compute devices."""
     return _device_health()
+
+
+@app.get("/api/calibration")
+def api_get_calibration(
+    series_id: str = Query(..., min_length=1),
+    model_type: str = Query("chronos"),
+    dataset_id: Optional[str] = Query(None),
+) -> dict[str, Any]:
+    """Retrieve stored validation-only calibration stats for a series."""
+    ds_id = dataset_id or app.state.default_dataset_id or "retail-demand-m5"
+    cal = get_series_calibration(series_id, model_type, ds_id)
+    if not cal:
+        return {"calibrated": False, "series_id": series_id, "model_type": model_type, "dataset_id": ds_id, "scale_k": 1.0}
+    return cal
+
+
+@app.post("/api/calibration/run")
+def api_run_calibration(req: CalibrationRequest) -> dict[str, Any]:
+    """Fit 80% interval calibration factor on validation backtests only (never test window)."""
+    ds_id = req.dataset_id or app.state.default_dataset_id or "retail-demand-m5"
+    try:
+        if req.dataset_id and req.dataset_id != "default":
+            history = get_series_history(req.dataset_id, req.series_id)
+        else:
+            history = get_series_legacy(app.state.sales, req.series_id)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Unknown series: {req.series_id}") from e
+
+    mt = (req.model_type or "chronos").lower().strip()
+    if mt == "chronos" and app.state.pipeline is None:
+        raise HTTPException(status_code=500, detail=app.state.load_error or "Chronos-2 model failed to load.")
+    chronos_tuple = (app.state.pipeline, app.state.device) if app.state.pipeline else None
+
+    try:
+        return calibrate_series_validation(
+            history_df=history,
+            series_id=req.series_id,
+            model_type=mt,
+            dataset_id=ds_id,
+            horizon=req.horizon,
+            num_cutoffs=req.num_cutoffs,
+            chronos_pipeline_tuple=chronos_tuple,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/api/datasets")
