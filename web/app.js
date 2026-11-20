@@ -108,6 +108,14 @@ const api = {
   getDatasets: () => apiFetch("/api/datasets"),
   getHistoryRuns: () => apiFetch("/api/history/runs"),
   getRunDetails: (runId) => apiFetch(`/api/history/runs/${runId}`),
+  getModels: (datasetId) => apiFetch(datasetId ? `/api/models?dataset_id=${encodeURIComponent(datasetId)}` : "/api/models"),
+  postTrainModel: (payload) =>
+    apiFetch("/api/models/train", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  getTrainStatus: (runId) => apiFetch(`/api/models/train/${runId}`),
 };
 
 function showAlert(message, type = "error") {
@@ -255,6 +263,8 @@ function switchTab(tabId) {
     }, 50);
   } else if (tabId === "overview") {
     loadOverview();
+  } else if (tabId === "training") {
+    loadTrainingView();
   } else if (tabId === "comparison") {
     syncComparisonSelectors();
   } else if (tabId === "datasets") {
@@ -1061,11 +1071,268 @@ async function inspectRun(runId) {
   }
 }
 
+// --- Model Training Controller ---
+
+let trainingPollTimer = null;
+
+async function loadTrainingView() {
+  try {
+    const datasets = await api.getDatasets();
+    const sel = el("train-dataset-select");
+    sel.innerHTML = "";
+    if (!datasets || datasets.length === 0) {
+      sel.innerHTML = `<option value="">No imported datasets found</option>`;
+      return;
+    }
+    datasets.forEach((d) => {
+      const opt = document.createElement("option");
+      opt.value = d.id;
+      opt.textContent = `${d.name} (${d.num_series} series, ${d.frequency || "D"})`;
+      sel.appendChild(opt);
+    });
+
+    if (state.selectedDatasetId && datasets.some((d) => d.id === state.selectedDatasetId)) {
+      sel.value = state.selectedDatasetId;
+    } else {
+      sel.value = datasets[0].id;
+    }
+
+    updateTrainDatasetMetadata(datasets.find((d) => d.id === sel.value));
+
+    sel.onchange = () => {
+      const ds = datasets.find((d) => d.id === sel.value);
+      updateTrainDatasetMetadata(ds);
+    };
+
+    await loadTrainedModels();
+  } catch (err) {
+    showAlert(err.message);
+  }
+}
+
+function updateTrainDatasetMetadata(ds) {
+  if (!ds) return;
+  el("train-info-series").textContent = ds.num_series || "--";
+  el("train-info-records").textContent = intFmt.format(ds.num_records || 0);
+  el("train-info-freq").textContent = ds.frequency || "D";
+  el("train-info-dates").textContent = `${ds.date_start || "--"} to ${ds.date_end || "--"}`;
+  el("train-info-target").textContent = ds.target_col || "--";
+
+  if (!el("train-model-name").value) {
+    el("train-model-name").value = `Custom-Model-${ds.name.replace(/\s+/g, "-")}-v1`;
+  }
+}
+
+async function loadTrainedModels() {
+  try {
+    const models = await api.getModels();
+    const tbody = el("trained-models-tbody");
+    tbody.innerHTML = "";
+    if (!models || models.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="11" class="muted-cell" style="text-align:center; padding:20px;">No custom models trained yet. Configure above and click "Start Training".</td></tr>`;
+      return;
+    }
+
+    models.forEach((m) => {
+      const tr = document.createElement("tr");
+      const nameDisp = (m.name || "Custom Model").replace(/LightGBM/gi, "Custom Model");
+      const met = m.metrics || {};
+      tr.innerHTML = `
+        <td><strong>${nameDisp}</strong><br><small class="text-muted"><code>${m.model_id}</code></small></td>
+        <td><code>${m.dataset_id}</code></td>
+        <td class="num">${m.num_series || "-"}</td>
+        <td class="num">${m.num_samples ? intFmt.format(m.num_samples) : "-"}</td>
+        <td class="num">${m.duration_sec !== undefined ? m.duration_sec + "s" : "-"}</td>
+        <td class="num">${met.mae !== undefined ? dec2Fmt.format(met.mae) : "-"}</td>
+        <td class="num">${met.rmse !== undefined ? dec2Fmt.format(met.rmse) : "-"}</td>
+        <td class="num">${met.wape !== undefined ? (met.wape * 100).toFixed(1) + "%" : "-"}</td>
+        <td class="num">${met.coverage_80 !== undefined ? (met.coverage_80 * 100).toFixed(1) + "%" : "-"}</td>
+        <td><span class="pill" style="color:var(--success); font-weight:600;">${m.status || "COMPLETED"}</span></td>
+        <td>
+          <button type="button" class="btn-sm activate-model-btn" data-model-id="${m.model_id}" data-model-name="${nameDisp}" style="background:var(--surface); box-shadow:var(--neu-raised-sm); border:0; padding:4px 10px; border-radius:6px; cursor:pointer; font-size:12px; font-weight:600; color:var(--primary);">
+            Use for Forecast
+          </button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    tbody.querySelectorAll(".activate-model-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        state.selectedModel = "custom";
+        const modelSelect = el("model-select");
+        if (modelSelect) modelSelect.value = "custom";
+        switchTab("forecasting");
+        showAlert(`Model "${btn.dataset.modelName}" activated for forecasting.`, "success");
+      });
+    });
+  } catch (err) {
+    showAlert("Failed to load trained models: " + err.message);
+  }
+}
+
+async function handleStartTraining() {
+  const datasetId = el("train-dataset-select").value;
+  if (!datasetId) {
+    showAlert("Please select a target dataset for training.");
+    return;
+  }
+
+  const modelName = el("train-model-name").value.trim() || `Custom-Model-${datasetId}`;
+  const valFraction = parseFloat(el("train-val-fraction").value) || 0.15;
+  const nEstimators = parseInt(el("hp-n-estimators").value, 10) || 100;
+  const learningRate = parseFloat(el("hp-learning-rate").value) || 0.05;
+  const maxDepth = parseInt(el("hp-max-depth").value, 10) || 6;
+  const numLeaves = parseInt(el("hp-num-leaves").value, 10) || 31;
+  const minChildSamples = parseInt(el("hp-min-child").value, 10) || 20;
+
+  const lagStr = el("train-lags").value;
+  const lags = lagStr
+    .split(",")
+    .map((s) => parseInt(s.trim(), 10))
+    .filter((n) => !isNaN(n) && n > 0);
+
+  const rollStr = el("train-rolling").value;
+  const rollingWindows = rollStr
+    .split(",")
+    .map((s) => parseInt(s.trim(), 10))
+    .filter((n) => !isNaN(n) && n > 0);
+
+  const payload = {
+    dataset_id: datasetId,
+    model_name: modelName,
+    val_fraction: valFraction,
+    n_estimators: nEstimators,
+    learning_rate: learningRate,
+    max_depth: maxDepth,
+    num_leaves: numLeaves,
+    min_child_samples: minChildSamples,
+    lags: lags.length > 0 ? lags : undefined,
+    rolling_windows: rollingWindows.length > 0 ? rollingWindows : undefined,
+  };
+
+  const startBtn = el("train-start-btn");
+  const spinner = el("train-spinner");
+  const badge = el("train-status-badge");
+  const telemetryBox = el("train-telemetry-box");
+  const liveStatusText = el("train-live-status-text");
+  const liveElapsed = el("train-live-elapsed");
+  const progressBar = el("train-progress-bar");
+  const resultsPanel = el("train-results-panel");
+
+  startBtn.disabled = true;
+  spinner.hidden = false;
+  badge.textContent = "TRAINING";
+  badge.style.color = "var(--forecast)";
+  telemetryBox.hidden = false;
+  resultsPanel.hidden = true;
+  liveStatusText.textContent = "Initializing dataset & engineering features...";
+  progressBar.style.width = "20%";
+
+  const startTime = performance.now();
+  let elapsedSec = 0;
+
+  if (trainingPollTimer) clearInterval(trainingPollTimer);
+
+  const timerTicker = setInterval(() => {
+    elapsedSec = ((performance.now() - startTime) / 1000).toFixed(1);
+    liveElapsed.textContent = `${elapsedSec}s elapsed`;
+  }, 200);
+
+  try {
+    const res = await api.postTrainModel(payload);
+    const runId = res.run_id;
+
+    trainingPollTimer = setInterval(async () => {
+      try {
+        const job = await api.getTrainStatus(runId);
+        if (job.status === "RUNNING") {
+          liveStatusText.textContent = job.progress || "Fitting recursive quantile models...";
+          progressBar.style.width = "65%";
+        } else if (job.status === "COMPLETED") {
+          clearInterval(trainingPollTimer);
+          clearInterval(timerTicker);
+          trainingPollTimer = null;
+
+          progressBar.style.width = "100%";
+          liveStatusText.textContent = "Custom Model trained and validated successfully!";
+          badge.textContent = "COMPLETED";
+          badge.style.color = "var(--success)";
+          startBtn.disabled = false;
+          spinner.hidden = true;
+
+          const m = job.metrics || {};
+          el("res-val-mae").textContent = m.mae !== undefined ? dec2Fmt.format(m.mae) : "--";
+          el("res-val-rmse").textContent = m.rmse !== undefined ? dec2Fmt.format(m.rmse) : "--";
+          el("res-val-wape").textContent = m.wape !== undefined ? (m.wape * 100).toFixed(1) + "%" : "--";
+          el("res-val-cov").textContent = m.coverage_80 !== undefined ? (m.coverage_80 * 100).toFixed(1) + "%" : "--";
+          el("res-val-width").textContent = m.mean_interval_width !== undefined ? dec1Fmt.format(m.mean_interval_width) : "--";
+          el("res-val-pinball").textContent = m.pinball_loss_q50 !== undefined ? dec2Fmt.format(m.pinball_loss_q50) : "--";
+          resultsPanel.hidden = false;
+
+          await loadTrainedModels();
+          showAlert(`Custom model "${modelName}" successfully trained!`, "success");
+        } else if (job.status === "FAILED") {
+          clearInterval(trainingPollTimer);
+          clearInterval(timerTicker);
+          trainingPollTimer = null;
+
+          progressBar.style.width = "100%";
+          progressBar.style.background = "var(--error)";
+          liveStatusText.textContent = `Training failed: ${job.error || "Unknown error"}`;
+          badge.textContent = "FAILED";
+          badge.style.color = "var(--error)";
+          startBtn.disabled = false;
+          spinner.hidden = true;
+          showAlert("Model training failed: " + (job.error || "Unknown error"));
+        }
+      } catch (pollErr) {
+        // Polling error
+      }
+    }, 1200);
+  } catch (err) {
+    clearInterval(timerTicker);
+    startBtn.disabled = false;
+    spinner.hidden = true;
+    badge.textContent = "FAILED";
+    badge.style.color = "var(--error)";
+    liveStatusText.textContent = `Error: ${err.message}`;
+    showAlert("Failed to start training: " + err.message);
+  }
+}
+
+function initTrainingEvents() {
+  const startBtn = el("train-start-btn");
+  if (startBtn) startBtn.addEventListener("click", handleStartTraining);
+
+  const refreshBtn = el("refresh-models-btn");
+  if (refreshBtn) refreshBtn.addEventListener("click", loadTrainedModels);
+
+  const pFast = el("preset-fast");
+  const pDef = el("preset-default");
+  const pDeep = el("preset-deep");
+
+  function setPreset(activeBtn, nEst, lr, depth, leaves, child) {
+    [pFast, pDef, pDeep].forEach((b) => b && b.classList.remove("active"));
+    if (activeBtn) activeBtn.classList.add("active");
+    el("hp-n-estimators").value = nEst;
+    el("hp-learning-rate").value = lr;
+    el("hp-max-depth").value = depth;
+    el("hp-num-leaves").value = leaves;
+    el("hp-min-child").value = child;
+  }
+
+  if (pFast) pFast.addEventListener("click", () => setPreset(pFast, 50, 0.08, 4, 15, 10));
+  if (pDef) pDef.addEventListener("click", () => setPreset(pDef, 100, 0.05, 6, 31, 20));
+  if (pDeep) pDeep.addEventListener("click", () => setPreset(pDeep, 200, 0.03, 8, 63, 30));
+}
+
 // --- Setup & Bootstrap ---
 
 function setupEvents() {
   initNavigation();
   initDatasetWizard();
+  initTrainingEvents();
 
   el("product-select").addEventListener("change", (e) => {
     state.selectedProduct = e.target.value;

@@ -80,3 +80,30 @@ def test_api_history_runs(client: TestClient):
     detail = detail_resp.json()
     assert detail["id"] == run_id
     assert "values" in detail
+
+
+def test_api_train_custom_model(client: TestClient):
+    payload = {
+        "dataset_id": "retail-demand-m5",
+        "model_name": "Test-Custom-Model",
+        "n_estimators": 20,
+        "learning_rate": 0.1,
+        "max_depth": 4,
+        "num_leaves": 15,
+        "min_child_samples": 10,
+        "val_fraction": 0.1,
+        "lags": [1, 7],
+        "rolling_windows": [7],
+    }
+    resp = client.post("/api/models/train", json=payload)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "run_id" in data
+    assert data["status"] in ("QUEUED", "RUNNING")
+
+    # Poll status
+    status_resp = client.get(f"/api/models/train/{data['run_id']}")
+    assert status_resp.status_code == 200
+    s_data = status_resp.json()
+    assert "status" in s_data
+    assert s_data["status"] in ("QUEUED", "RUNNING", "COMPLETED")

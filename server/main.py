@@ -93,7 +93,10 @@ class TrainModelRequest(BaseModel):
     learning_rate: float = Field(default=0.05, ge=0.001, le=0.5)
     max_depth: int = Field(default=6, ge=2, le=15)
     num_leaves: int = Field(default=31, ge=7, le=127)
+    min_child_samples: int = Field(default=20, ge=2, le=100)
     val_fraction: float = Field(default=0.15, ge=0.05, le=0.4)
+    lags: Optional[list[int]] = None
+    rolling_windows: Optional[list[int]] = None
 
 
 @asynccontextmanager
@@ -319,8 +322,20 @@ def api_list_models(dataset_id: Optional[str] = Query(None)) -> list[dict[str, A
 
 @app.post("/api/models/train")
 def api_train_model(req: TrainModelRequest) -> dict[str, Any]:
-    """Launch asynchronous training of custom recursive LightGBM model."""
+    """Launch asynchronous training of custom recursive forecasting model."""
     try:
+        feature_config = None
+        if req.lags or req.rolling_windows:
+            from src.rdf.features import get_default_feature_config
+            from src.rdf.dataset_manager import get_dataset_version
+            v = get_dataset_version(req.dataset_id)
+            freq = v["frequency"] if v else "D"
+            feature_config = get_default_feature_config(freq)
+            if req.lags:
+                feature_config["lags"] = req.lags
+            if req.rolling_windows:
+                feature_config["rolling_windows"] = req.rolling_windows
+
         run_id = start_training_job(
             dataset_id=req.dataset_id,
             model_name=req.model_name or "",
@@ -329,7 +344,9 @@ def api_train_model(req: TrainModelRequest) -> dict[str, Any]:
                 "learning_rate": req.learning_rate,
                 "max_depth": req.max_depth,
                 "num_leaves": req.num_leaves,
+                "min_child_samples": req.min_child_samples,
             },
+            feature_config=feature_config,
             val_fraction=req.val_fraction,
         )
         return {"run_id": run_id, "status": "QUEUED"}

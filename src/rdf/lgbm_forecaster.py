@@ -322,7 +322,7 @@ def start_training_job(
 
     model_id = f"lgbm-{uuid.uuid4().hex[:8]}"
     run_id = f"run-{uuid.uuid4().hex[:8]}"
-    clean_name = model_name.strip() or f"LightGBM-{dataset_id}"
+    clean_name = model_name.strip() or f"Custom-Model-{dataset_id}"
 
     # Insert initial DB records
     with get_db() as conn:
@@ -366,7 +366,7 @@ def start_training_job(
         "model_id": model_id,
         "dataset_id": dataset_id,
         "status": "RUNNING",
-        "progress": "Training LightGBM models...",
+        "progress": "Training Custom Model (Q10, Q50, Q90)...",
         "start_time": time.time(),
         "error": None,
     }
@@ -407,7 +407,10 @@ def start_training_job(
                     ),
                 )
             _TRAINING_JOBS[run_id]["status"] = "COMPLETED"
+            _TRAINING_JOBS[run_id]["progress"] = "Model trained successfully."
             _TRAINING_JOBS[run_id]["metrics"] = meta["metrics"]
+            _TRAINING_JOBS[run_id]["meta"] = meta
+            _TRAINING_JOBS[run_id]["duration_sec"] = round(duration, 2)
             _TRAINING_JOBS[run_id]["artifact_path"] = str(art_path)
         except Exception as e:
             with get_db() as conn:
@@ -416,6 +419,7 @@ def start_training_job(
                     ("FAILED", str(e), run_id),
                 )
             _TRAINING_JOBS[run_id]["status"] = "FAILED"
+            _TRAINING_JOBS[run_id]["progress"] = "Training failed."
             _TRAINING_JOBS[run_id]["error"] = str(e)
 
     thread = threading.Thread(target=_worker, daemon=True)
@@ -426,7 +430,10 @@ def start_training_job(
 def get_training_job_status(run_id: str) -> dict[str, Any]:
     """Retrieve status of training run."""
     if run_id in _TRAINING_JOBS:
-        return _TRAINING_JOBS[run_id]
+        job = dict(_TRAINING_JOBS[run_id])
+        if job["status"] == "RUNNING":
+            job["elapsed_sec"] = round(time.time() - job["start_time"], 1)
+        return job
 
     init_db()
     with get_db() as conn:

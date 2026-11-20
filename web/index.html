@@ -25,6 +25,7 @@
     <nav class="main-nav" aria-label="Main Navigation">
       <button type="button" class="nav-tab active" data-tab="forecasting">Forecasting</button>
       <button type="button" class="nav-tab" data-tab="overview">Overview</button>
+      <button type="button" class="nav-tab" data-tab="training">Model Training</button>
       <button type="button" class="nav-tab" data-tab="comparison">Model Comparison</button>
       <button type="button" class="nav-tab" data-tab="datasets">Data Management</button>
       <button type="button" class="nav-tab" data-tab="history">Forecasting History</button>
@@ -292,22 +293,29 @@
             <span class="mono-card-link">Launch Forecaster &rarr;</span>
           </div>
 
+          <div class="panel mono-card" data-jump="training">
+            <span class="mono-card-num">02 / TRAIN</span>
+            <h3>Model Training</h3>
+            <p>Train custom recursive multi-quantile models with configurable lags, rolling stats &amp; tree depth.</p>
+            <span class="mono-card-link">Configure &amp; Train &rarr;</span>
+          </div>
+
           <div class="panel mono-card" data-jump="comparison">
-            <span class="mono-card-num">02 / COMPARE</span>
+            <span class="mono-card-num">03 / COMPARE</span>
             <h3>Model Comparison</h3>
             <p>Side-by-side benchmark comparing Chronos-2, Custom Model, and Seasonal Baseline.</p>
             <span class="mono-card-link">View Comparison &rarr;</span>
           </div>
 
           <div class="panel mono-card" data-jump="datasets">
-            <span class="mono-card-num">03 / DATASETS</span>
+            <span class="mono-card-num">04 / DATASETS</span>
             <h3>Data Management</h3>
             <p>Import and validate retail CSV, XLSX, or Parquet datasets with automated quality checks.</p>
             <span class="mono-card-link">Manage Datasets &rarr;</span>
           </div>
 
           <div class="panel mono-card" data-jump="history">
-            <span class="mono-card-num">04 / ARCHIVE</span>
+            <span class="mono-card-num">05 / ARCHIVE</span>
             <h3>Forecasting History</h3>
             <p>Audit and inspect past forecasting runs, performance metrics, and stored curves.</p>
             <span class="mono-card-link">Open Archive &rarr;</span>
@@ -339,7 +347,218 @@
         </div>
       </section>
 
-      <!-- ================= 3. MODEL COMPARISON VIEW ================= -->
+      <!-- ================= 3. MODEL TRAINING VIEW ================= -->
+      <section id="view-training" class="view-panel">
+        <!-- Top Controls / Dataset & Spec -->
+        <section class="panel controls-panel" aria-label="Model Training Configuration">
+          <div class="panel-header" style="margin-bottom: var(--sp-4);">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:var(--sp-2);">
+              <div>
+                <h2 style="margin:0 0 var(--sp-1) 0; font-size:18px; font-weight:600; color:var(--text);">Custom Model Training &amp; Experiment Management</h2>
+                <p style="margin:0; font-size:13px; color:var(--muted);">Train multi-quantile (Q10, Q50, Q90) recursive forecasting models across multi-series or single-series retail datasets.</p>
+              </div>
+              <span id="train-status-badge" class="pill" style="color:var(--primary); font-weight:600;">IDLE</span>
+            </div>
+          </div>
+
+          <!-- Dataset Selection & Quick Info -->
+          <div class="controls-grid" style="grid-template-columns: minmax(200px, 1.4fr) minmax(200px, 1.4fr) minmax(180px, 1.1fr) auto;">
+            <div class="field">
+              <label for="train-dataset-select" class="section-label">Target Dataset</label>
+              <div class="select-wrap">
+                <select id="train-dataset-select">
+                  <option value="">Loading datasets...</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="train-model-name" class="section-label">Model Identifier / Name</label>
+              <input type="text" id="train-model-name" placeholder="e.g. Custom-Model-Retail-v1" />
+            </div>
+
+            <div class="field">
+              <label for="train-val-fraction" class="section-label">Validation Split</label>
+              <div class="select-wrap">
+                <select id="train-val-fraction">
+                  <option value="0.10">10% Chronological Holdout</option>
+                  <option value="0.15" selected>15% Chronological Holdout</option>
+                  <option value="0.20">20% Chronological Holdout</option>
+                  <option value="0.25">25% Chronological Holdout</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="field field-action">
+              <button id="train-start-btn" type="button" class="btn-primary" style="height:42px;">
+                <span id="train-spinner" class="spinner" hidden></span>
+                <span>Start Training</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Dataset Metadata Snippet -->
+          <div id="train-dataset-info" class="mono-box" style="margin-top: var(--sp-4); font-size: 12px; display: flex; flex-wrap: wrap; gap: var(--sp-4); justify-content: space-between;">
+            <div><span style="color:var(--muted)">Series Count:</span> <strong id="train-info-series">--</strong></div>
+            <div><span style="color:var(--muted)">Total Records:</span> <strong id="train-info-records">--</strong></div>
+            <div><span style="color:var(--muted)">Frequency:</span> <strong id="train-info-freq">--</strong></div>
+            <div><span style="color:var(--muted)">Date Coverage:</span> <strong id="train-info-dates">--</strong></div>
+            <div><span style="color:var(--muted)">Target Column:</span> <strong id="train-info-target">--</strong></div>
+          </div>
+        </section>
+
+        <!-- Configuration Grid: Feature Engineering & Hyperparameters -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: var(--sp-4); margin-top: var(--sp-4);">
+          <!-- Panel A: Feature Architecture -->
+          <section class="panel" style="padding: var(--sp-4);">
+            <div class="section-label" style="margin-bottom: var(--sp-3);">Feature Engineering Architecture</div>
+            <div class="field" style="margin-bottom: var(--sp-3);">
+              <label for="train-lags" style="font-size:12px; font-weight:600; color:var(--text); display:block; margin-bottom:4px;">Lag Observation Windows (comma-separated)</label>
+              <input type="text" id="train-lags" value="1, 2, 3, 7, 14, 28, 56" />
+              <span style="font-size:11px; color:var(--muted); display:block; margin-top:4px;">No future leakage: strictly historical observations ($t-k$).</span>
+            </div>
+
+            <div class="field" style="margin-bottom: var(--sp-3);">
+              <label for="train-rolling" style="font-size:12px; font-weight:600; color:var(--text); display:block; margin-bottom:4px;">Rolling Statistics Windows (comma-separated)</label>
+              <input type="text" id="train-rolling" value="7, 14, 28" />
+              <span style="font-size:11px; color:var(--muted); display:block; margin-top:4px;">Calculates rolling mean and rolling standard deviation with lag 1 shift.</span>
+            </div>
+
+            <div class="field">
+              <span style="font-size:12px; font-weight:600; color:var(--text); display:block; margin-bottom:6px;">Calendar Features (Frequency-Aware)</span>
+              <div style="display:flex; flex-wrap:wrap; gap:6px;">
+                <span class="pill" style="box-shadow:none; border:1px solid var(--border);">Day of Week</span>
+                <span class="pill" style="box-shadow:none; border:1px solid var(--border);">Day of Month</span>
+                <span class="pill" style="box-shadow:none; border:1px solid var(--border);">Week of Year</span>
+                <span class="pill" style="box-shadow:none; border:1px solid var(--border);">Month</span>
+                <span class="pill" style="box-shadow:none; border:1px solid var(--border);">Quarter</span>
+                <span class="pill" style="box-shadow:none; border:1px solid var(--border);">Weekend Flag</span>
+              </div>
+            </div>
+          </section>
+
+          <!-- Panel B: Model Hyperparameters -->
+          <section class="panel" style="padding: var(--sp-4);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: var(--sp-3); flex-wrap:wrap; gap:6px;">
+              <div class="section-label" style="margin:0;">Model Hyperparameters</div>
+              <div style="display:flex; gap:6px;">
+                <button type="button" id="preset-fast" class="nav-tab" style="padding:4px 8px; font-size:11px; border-radius:6px;">Fast (50 trees)</button>
+                <button type="button" id="preset-default" class="nav-tab active" style="padding:4px 8px; font-size:11px; border-radius:6px;">Standard (100)</button>
+                <button type="button" id="preset-deep" class="nav-tab" style="padding:4px 8px; font-size:11px; border-radius:6px;">Deep (200)</button>
+              </div>
+            </div>
+
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3);">
+              <div class="field">
+                <label for="hp-n-estimators" style="font-size:12px; font-weight:600; color:var(--text); display:block; margin-bottom:4px;">Estimators / Trees</label>
+                <input type="number" id="hp-n-estimators" value="100" min="10" max="500" />
+              </div>
+
+              <div class="field">
+                <label for="hp-learning-rate" style="font-size:12px; font-weight:600; color:var(--text); display:block; margin-bottom:4px;">Learning Rate</label>
+                <input type="number" id="hp-learning-rate" value="0.05" step="0.01" min="0.005" max="0.5" />
+              </div>
+
+              <div class="field">
+                <label for="hp-max-depth" style="font-size:12px; font-weight:600; color:var(--text); display:block; margin-bottom:4px;">Max Tree Depth</label>
+                <input type="number" id="hp-max-depth" value="6" min="2" max="15" />
+              </div>
+
+              <div class="field">
+                <label for="hp-num-leaves" style="font-size:12px; font-weight:600; color:var(--text); display:block; margin-bottom:4px;">Number of Leaves</label>
+                <input type="number" id="hp-num-leaves" value="31" min="7" max="127" />
+              </div>
+
+              <div class="field" style="grid-column: span 2;">
+                <label for="hp-min-child" style="font-size:12px; font-weight:600; color:var(--text); display:block; margin-bottom:4px;">Min Child Samples</label>
+                <input type="number" id="hp-min-child" value="20" min="2" max="100" />
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- Live Training Progress & Telemetry Box -->
+        <section id="train-telemetry-box" class="panel" style="padding: var(--sp-4); margin-top: var(--sp-4);" hidden>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:var(--sp-2);">
+            <div style="font-weight:600; font-size:14px; display:flex; align-items:center; gap:8px;">
+              <span id="train-live-spinner" class="spinner" style="border-width:2px; width:14px; height:14px;"></span>
+              <span id="train-live-status-text">Training Custom Model...</span>
+            </div>
+            <span id="train-live-elapsed" class="mono-sub">0.0s elapsed</span>
+          </div>
+
+          <div style="height: 8px; width:100%; border-radius:4px; background:var(--surface); box-shadow:var(--neu-inset); overflow:hidden; margin-bottom:var(--sp-3);">
+            <div id="train-progress-bar" style="height:100%; width:20%; background:var(--primary); transition: width 0.3s ease;"></div>
+          </div>
+
+          <!-- Training Output / Validation Results (Populated when finished) -->
+          <div id="train-results-panel" hidden style="margin-top:var(--sp-3); border-top: 1px solid var(--border); padding-top:var(--sp-3);">
+            <div style="font-weight:600; font-size:13px; color:var(--text); margin-bottom:var(--sp-2);">Validation Holdout Performance</div>
+            <div class="kpi-row" style="grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));">
+              <div class="kpi-card">
+                <span class="kpi-label">Val MAE</span>
+                <span id="res-val-mae" class="kpi-value">--</span>
+              </div>
+              <div class="kpi-card">
+                <span class="kpi-label">Val RMSE</span>
+                <span id="res-val-rmse" class="kpi-value">--</span>
+              </div>
+              <div class="kpi-card">
+                <span class="kpi-label">Val WAPE</span>
+                <span id="res-val-wape" class="kpi-value">--</span>
+              </div>
+              <div class="kpi-card">
+                <span class="kpi-label">80% Coverage</span>
+                <span id="res-val-cov" class="kpi-value">--</span>
+              </div>
+              <div class="kpi-card">
+                <span class="kpi-label">Mean Width</span>
+                <span id="res-val-width" class="kpi-value">--</span>
+              </div>
+              <div class="kpi-card">
+                <span class="kpi-label">Pinball (Q50)</span>
+                <span id="res-val-pinball" class="kpi-value">--</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Model Registry: Trained Models Table -->
+        <section class="panel" style="padding: var(--sp-4); margin-top: var(--sp-4);">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: var(--sp-3); flex-wrap:wrap; gap:8px;">
+            <div>
+              <h3 style="margin:0; font-size:16px; font-weight:600;">Trained Custom Models Registry</h3>
+              <p style="margin:2px 0 0 0; font-size:12px; color:var(--muted);">All fitted multi-quantile models persisted with hyperparameter snapshots and validation metrics.</p>
+            </div>
+            <button id="refresh-models-btn" type="button" class="btn-sm" style="background:var(--surface); box-shadow:var(--neu-raised-sm); border:0; padding:6px 14px; border-radius:8px; cursor:pointer; font-weight:500; font-family:inherit;">Refresh Registry</button>
+          </div>
+
+          <div class="table-wrap">
+            <table class="data-table" id="trained-models-table">
+              <thead>
+                <tr>
+                  <th>Model Name &amp; ID</th>
+                  <th>Dataset</th>
+                  <th class="num">Series</th>
+                  <th class="num">Samples</th>
+                  <th class="num">Duration</th>
+                  <th class="num">Val MAE</th>
+                  <th class="num">Val RMSE</th>
+                  <th class="num">Val WAPE</th>
+                  <th class="num">80% Cov</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="trained-models-tbody">
+                <tr><td colspan="11" class="muted-cell" style="text-align:center; padding:20px;">Loading trained models...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <!-- ================= 4. MODEL COMPARISON VIEW ================= -->
       <section id="view-comparison" class="view-panel">
         <section class="panel controls-panel" aria-label="Comparison controls">
           <div class="controls-grid">
