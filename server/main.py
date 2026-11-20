@@ -1,13 +1,22 @@
-"""FastAPI backend for Retail Product Demand Forecasting.
+"""FastAPI backend for Retail Product Demand Forecasting & Model Comparison Platform.
 
-Run: uvicorn server.main:app --reload
+Maintains 100% backward compatibility with existing Chronos-2 endpoints while adding:
+- Universal Dataset Management (CSV, XLSX, Parquet)
+- Custom Recursive LightGBM Training & Inference
+- Seasonal-Naive Baseline Benchmarking
+- Multi-Model Side-by-Side Comparison
+- Walk-Forward Backtesting & Error Metrics Evaluation
+- Persistent Forecast & Experiment History
 """
 from __future__ import annotations
 
+import json
+import shutil
 import sys
+import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = PROJECT_ROOT / "src"
@@ -16,26 +25,91 @@ WEB_DIR = PROJECT_ROOT / "web"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+import numpy as np
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from rdf import config
-from rdf.data_loader import get_series, list_series, load_sales, series_summary
-from rdf.forecaster import ForecastError, forecast, load_pipeline
+from rdf.baseline import forecast_seasonal_naive
+from rdf.data_loader import get_series as get_series_legacy, list_series as list_series_legacy, load_sales, series_summary
+from rdf.dataset_manager import (
+    ensure_default_dataset,
+    get_dataset_series_list,
+    get_dataset_version,
+    get_series_history,
+    import_dataset,
+    inspect_file,
+    list_datasets,
+)
+from rdf.db import get_db, init_db, now_iso
+from rdf.evaluation import compute_metrics, generate_backtest_cutoffs
+from rdf.forecast_service import (
+    compare_models,
+    generate_single_forecast,
+    get_forecast_run_details,
+    list_forecast_runs,
+)
+from rdf.forecaster import ForecastError, forecast as forecast_chronos, load_pipeline
+from rdf.lgbm_forecaster import (
+    get_training_job_status,
+    list_trained_models,
+    start_training_job,
+)
 
+
+# --- Request & Response Models ---
 
 class ForecastRequest(BaseModel):
     series_id: str = Field(..., min_length=1)
-    horizon: int = Field(default=config.DEFAULT_HORIZON, ge=config.MIN_HORIZON, le=config.MAX_HORIZON)
+    horizon: int = Field(default=config.DEFAULT_HORIZON, ge=1, le=365)
+    model_type: str = Field(default="chronos")
+    model_id: Optional[str] = None
+    dataset_id: Optional[str] = None
+
+
+class CompareRequest(BaseModel):
+    series_id: str = Field(..., min_length=1)
+    horizon: int = Field(default=28, ge=1, le=180)
+    dataset_id: Optional[str] = None
+    cutoff_index: Optional[int] = None
+
+
+class BacktestRequest(BaseModel):
+    series_id: str = Field(..., min_length=1)
+    horizon: int = Field(default=28, ge=7, le=90)
+    dataset_id: Optional[str] = None
+    num_cutoffs: int = Field(default=3, ge=1, le=6)
+    models: list[str] = Field(default_factory=lambda: ["baseline", "lightgbm", "chronos"])
+
+
+class TrainModelRequest(BaseModel):
+    dataset_id: str = Field(..., min_length=1)
+    model_name: Optional[str] = None
+    n_estimators: int = Field(default=100, ge=10, le=500)
+    learning_rate: float = Field(default=0.05, ge=0.001, le=0.5)
+    max_depth: int = Field(default=6, ge=2, le=15)
+    num_leaves: int = Field(default=31, ge=7, le=127)
+    val_fraction: float = Field(default=0.15, ge=0.05, le=0.4)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.sales = load_sales()
+    init_db()
+    try:
+        app.state.default_dataset_id = ensure_default_dataset()
+    except Exception as e:
+        app.state.default_dataset_id = None
+        print(f"Warning: Default dataset seeding skipped: {e}")
+
+    try:
+        app.state.sales = load_sales()
+    except Exception:
+        app.state.sales = pd.DataFrame(columns=["series_id", "date", "sales"])
+
     try:
         pipeline, device = load_pipeline()
         app.state.pipeline = pipeline
@@ -48,7 +122,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Retail Product Demand Forecasting", lifespan=lifespan)
+app = FastAPI(title="Retail Product Demand Forecasting Platform", lifespan=lifespan)
 
 
 @app.exception_handler(RequestValidationError)
@@ -60,16 +134,34 @@ async def validation_exception_handler(_request, exc: RequestValidationError) ->
     return JSONResponse(status_code=400, content={"detail": messages or "Invalid request input."})
 
 
+# --- Backward-Compatible Legacy Endpoints ---
+
 @app.get("/api/series")
-def api_series() -> list[str]:
-    return list_series(app.state.sales)
+def api_series(dataset_id: Optional[str] = Query(None)) -> list[str]:
+    """List series for active or default dataset."""
+    if dataset_id:
+        try:
+            return get_dataset_series_list(dataset_id)
+        except Exception as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+    if hasattr(app.state, "sales") and not app.state.sales.empty:
+        return list_series_legacy(app.state.sales)
+    if app.state.default_dataset_id:
+        return get_dataset_series_list(app.state.default_dataset_id)
+    return []
 
 
 @app.get("/api/history")
-def api_history(series_id: str = Query(..., min_length=1)) -> dict[str, Any]:
+def api_history(series_id: str = Query(..., min_length=1), dataset_id: Optional[str] = Query(None)) -> dict[str, Any]:
+    """Retrieve history for series."""
     try:
-        history = get_series(app.state.sales, series_id)
+        if dataset_id and dataset_id != "default":
+            history = get_series_history(dataset_id, series_id)
+        else:
+            history = get_series_legacy(app.state.sales, series_id)
     except KeyError as e:
+        raise HTTPException(status_code=404, detail=f"Unknown series: {series_id}") from e
+    except Exception as e:
         raise HTTPException(status_code=404, detail=f"Unknown series: {series_id}") from e
 
     summary = series_summary(history)
@@ -89,30 +181,314 @@ def api_history(series_id: str = Query(..., min_length=1)) -> dict[str, Any]:
 
 @app.post("/api/forecast")
 def api_forecast(req: ForecastRequest) -> dict[str, Any]:
+    """Generate forecast using selected model (Chronos-2, LightGBM, or Baseline)."""
+    model_type = (req.model_type or "chronos").lower().strip()
+
+    if model_type == "chronos" and (req.horizon < config.MIN_HORIZON or req.horizon > config.MAX_HORIZON):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Chronos-2 forecast horizon must be between {config.MIN_HORIZON} and {config.MAX_HORIZON} days.",
+        )
+
+    dataset_id = req.dataset_id or app.state.default_dataset_id or "retail-demand-m5"
+
+    # Fetch history
     try:
-        history = get_series(app.state.sales, req.series_id)
+        if req.dataset_id and req.dataset_id != "default":
+            history = get_series_history(req.dataset_id, req.series_id)
+        else:
+            history = get_series_legacy(app.state.sales, req.series_id)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=f"Unknown series: {req.series_id}") from e
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Unknown series: {req.series_id}") from e
 
-    if app.state.pipeline is None:
-        raise HTTPException(status_code=500, detail=app.state.load_error or "Model pipeline failed to load.")
+    # If Chronos-2 is requested, verify pipeline
+    if model_type == "chronos" and app.state.pipeline is None:
+        raise HTTPException(status_code=500, detail=app.state.load_error or "Chronos-2 model failed to load.")
+
+    chronos_tuple = (app.state.pipeline, app.state.device) if app.state.pipeline else None
 
     try:
-        res = forecast(app.state.pipeline, history, req.horizon, req.series_id)
-    except ForecastError as e:
+        return generate_single_forecast(
+            history_df=history,
+            horizon=req.horizon,
+            model_type=model_type,
+            model_id=req.model_id,
+            series_id=req.series_id,
+            dataset_id=dataset_id,
+            chronos_pipeline_tuple=chronos_tuple,
+        )
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
+
+# --- Universal Dataset Management Endpoints ---
+
+@app.get("/api/datasets")
+def api_list_datasets() -> list[dict[str, Any]]:
+    """List all imported datasets and their latest versions."""
+    return list_datasets()
+
+
+@app.get("/api/datasets/{dataset_id}")
+def api_get_dataset(dataset_id: str) -> dict[str, Any]:
+    """Retrieve metadata for a specific dataset."""
+    v_info = get_dataset_version(dataset_id)
+    if not v_info:
+        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found.")
+    return v_info
+
+
+@app.post("/api/datasets/inspect")
+async def api_inspect_dataset(file: UploadFile = File(...)) -> dict[str, Any]:
+    """Inspect an uploaded CSV/XLSX/Parquet file and suggest column mappings."""
+    suffix = Path(file.filename or "data.csv").suffix.lower()
+    if suffix not in (".csv", ".txt", ".xlsx", ".xls", ".parquet", ".pq"):
+        raise HTTPException(status_code=400, detail=f"Unsupported format '{suffix}'. Use CSV, XLSX, or Parquet.")
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        shutil.copyfileobj(file.file, tmp)
+        tmp_path = Path(tmp.name)
+
+    try:
+        meta = inspect_file(tmp_path)
+        return meta
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to inspect file: {e}") from e
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink()
+
+
+@app.post("/api/datasets/import")
+async def api_import_dataset(
+    file: UploadFile = File(...),
+    dataset_name: str = Form(...),
+    time_col: str = Form(...),
+    target_col: str = Form(...),
+    series_cols: str = Form(""),
+    covariates: str = Form(""),
+    frequency: str = Form("D"),
+    description: str = Form(""),
+) -> dict[str, Any]:
+    """Upload, validate, standardize, and store a new dataset version."""
+    suffix = Path(file.filename or "data.csv").suffix.lower()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        shutil.copyfileobj(file.file, tmp)
+        tmp_path = Path(tmp.name)
+
+    sc_list = [c.strip() for c in series_cols.split(",") if c.strip()] if series_cols else []
+    cov_list = [c.strip() for c in covariates.split(",") if c.strip()] if covariates else []
+
+    try:
+        res = import_dataset(
+            file_path=tmp_path,
+            dataset_name=dataset_name,
+            time_col=time_col,
+            target_col=target_col,
+            series_cols=sc_list,
+            covariates=cov_list,
+            frequency=frequency,
+            description=description,
+        )
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Dataset import failed: {e}") from e
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink()
+
+
+@app.get("/api/datasets/{dataset_id}/series")
+def api_dataset_series(dataset_id: str) -> list[str]:
+    """List series in a specific dataset."""
+    try:
+        return get_dataset_series_list(dataset_id)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+
+# --- Custom LightGBM Model Training Endpoints ---
+
+@app.get("/api/models")
+def api_list_models(dataset_id: Optional[str] = Query(None)) -> list[dict[str, Any]]:
+    """List trained custom LightGBM models."""
+    return list_trained_models(dataset_id)
+
+
+@app.post("/api/models/train")
+def api_train_model(req: TrainModelRequest) -> dict[str, Any]:
+    """Launch asynchronous training of custom recursive LightGBM model."""
+    try:
+        run_id = start_training_job(
+            dataset_id=req.dataset_id,
+            model_name=req.model_name or "",
+            hyperparameters={
+                "n_estimators": req.n_estimators,
+                "learning_rate": req.learning_rate,
+                "max_depth": req.max_depth,
+                "num_leaves": req.num_leaves,
+            },
+            val_fraction=req.val_fraction,
+        )
+        return {"run_id": run_id, "status": "QUEUED"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.get("/api/models/train/{run_id}")
+def api_get_train_status(run_id: str) -> dict[str, Any]:
+    """Poll status and validation metrics of model training run."""
+    try:
+        return get_training_job_status(run_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+
+# --- Model Comparison & Evaluation Endpoints ---
+
+@app.post("/api/compare")
+def api_compare_models(req: CompareRequest) -> dict[str, Any]:
+    """Compare Chronos-2, LightGBM, and Seasonal-Naive models side-by-side."""
+    dataset_id = req.dataset_id or app.state.default_dataset_id or "retail-demand-m5"
+    try:
+        history = get_series_history(dataset_id, req.series_id)
+    except Exception:
+        try:
+            history = get_series_legacy(app.state.sales, req.series_id)
+        except Exception as e:
+            raise HTTPException(status_code=404, detail=f"Unknown series: {req.series_id}") from e
+
+    chronos_tuple = (app.state.pipeline, app.state.device) if app.state.pipeline else None
+
+    try:
+        return compare_models(
+            history_df=history,
+            horizon=req.horizon,
+            series_id=req.series_id,
+            dataset_id=dataset_id,
+            cutoff_index=req.cutoff_index,
+            chronos_pipeline_tuple=chronos_tuple,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/api/evaluation/backtest")
+def api_backtest(req: BacktestRequest) -> dict[str, Any]:
+    """Perform walk-forward backtesting across historical rolling cutoffs."""
+    dataset_id = req.dataset_id or app.state.default_dataset_id or "retail-demand-m5"
+    try:
+        history = get_series_history(dataset_id, req.series_id)
+    except Exception:
+        history = get_series_legacy(app.state.sales, req.series_id)
+
+    dates = list(history["date"])
+    try:
+        cutoffs = generate_backtest_cutoffs(dates, req.horizon, req.num_cutoffs)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    chronos_tuple = (app.state.pipeline, app.state.device) if app.state.pipeline else None
+
+    cutoff_evaluations = []
+    for c_idx in cutoffs:
+        cutoff_date = dates[c_idx].strftime("%Y-%m-%d")
+        comp = compare_models(
+            history_df=history,
+            horizon=req.horizon,
+            series_id=req.series_id,
+            dataset_id=dataset_id,
+            cutoff_index=c_idx,
+            chronos_pipeline_tuple=chronos_tuple,
+        )
+        cutoff_evaluations.append({
+            "cutoff_index": c_idx,
+            "cutoff_date": cutoff_date,
+            "metrics": comp["metrics"],
+            "best_models": comp.get("best_models", {}),
+            "actual_test_values": comp.get("actual_test_values", []),
+            "actual_test_dates": comp.get("actual_test_dates", []),
+            "forecasts": {
+                m: comp["forecasts"][m].get("median", [])
+                for m in comp["forecasts"]
+                if "median" in comp["forecasts"][m]
+            },
+        })
+
+    # Compute overall mean metrics across cutoffs
+    aggregated_metrics: dict[str, dict[str, float]] = {}
+    for item in cutoff_evaluations:
+        for mtype, mdict in item["metrics"].items():
+            if mtype not in aggregated_metrics:
+                aggregated_metrics[mtype] = {}
+            for k, v in mdict.items():
+                if isinstance(v, (int, float)):
+                    aggregated_metrics[mtype].setdefault(k, []).append(v)  # type: ignore
+
+    mean_metrics: dict[str, dict[str, float]] = {}
+    for mtype, mdict in aggregated_metrics.items():
+        mean_metrics[mtype] = {
+            k: round(float(np.mean(vals)), 4) for k, vals in mdict.items()  # type: ignore
+        }
+
     return {
-        "dates": [pd.Timestamp(d).strftime("%Y-%m-%d") for d in res["date"]],
-        "median": [float(v) for v in res["median"]],
-        "expected": [float(v) for v in res["expected"]],
-        "q10": [float(v) for v in res["q10"]],
-        "q50": [float(v) for v in res["q50"]],
-        "q90": [float(v) for v in res["q90"]],
-        "total": float(res["expected"].sum()),
-        "daily_average": float(res["expected"].mean()),
-        "device": app.state.device,
-        "model": config.MODEL_ID,
+        "dataset_id": dataset_id,
+        "series_id": req.series_id,
+        "horizon": req.horizon,
+        "num_cutoffs": len(cutoffs),
+        "cutoff_evaluations": cutoff_evaluations,
+        "mean_metrics": mean_metrics,
+    }
+
+
+# --- Forecast History Endpoints ---
+
+@app.get("/api/history/runs")
+def api_list_runs(
+    dataset_id: Optional[str] = Query(None),
+    series_id: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+) -> list[dict[str, Any]]:
+    """Query past forecast runs."""
+    return list_forecast_runs(dataset_id=dataset_id, series_id=series_id, limit=limit)
+
+
+@app.get("/api/history/runs/{run_id}")
+def api_run_details(run_id: str) -> dict[str, Any]:
+    """Retrieve full details of a specific forecast run."""
+    run = get_forecast_run_details(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Forecast run '{run_id}' not found.")
+    return run
+
+
+# --- Overview & Statistics Endpoint ---
+
+@app.get("/api/overview")
+def api_overview() -> dict[str, Any]:
+    """System-wide summary metrics for Overview dashboard."""
+    init_db()
+    with get_db() as conn:
+        ds_count = conn.execute("SELECT COUNT(*) FROM datasets").fetchone()[0]
+        v_row = conn.execute("SELECT SUM(num_records), SUM(num_series) FROM dataset_versions").fetchone()
+        model_count = conn.execute("SELECT COUNT(*) FROM models").fetchone()[0]
+        run_count = conn.execute("SELECT COUNT(*) FROM forecast_runs").fetchone()[0]
+
+        recent_runs = conn.execute(
+            "SELECT id, dataset_id, series_id, model_type, horizon, created_at FROM forecast_runs ORDER BY created_at DESC LIMIT 5"
+        ).fetchall()
+
+    return {
+        "total_datasets": ds_count,
+        "total_records": v_row[0] or 0,
+        "total_series": v_row[1] or 0,
+        "total_models": model_count,
+        "total_forecasts": run_count,
+        "recent_runs": [dict(r) for r in recent_runs],
+        "chronos_status": "LOADED" if app.state.pipeline else "UNAVAILABLE",
+        "device": app.state.device or "CPU",
     }
 
 

@@ -1,25 +1,34 @@
 import { animate, stagger } from "https://cdn.jsdelivr.net/npm/motion@11.13.5/+esm";
 
-// Single application state object (no other globals).
+// Single application state object
 const state = {
+  activeTab: "forecasting",
   seriesByProduct: new Map(),
   selectedProduct: "",
   selectedStore: "",
+  selectedModel: "chronos",
   horizon: 28,
   rangeKey: "ALL",
   history: null,
   forecast: null,
+  evalMetrics: null,
   loadingInitial: true,
   loadingForecast: false,
+  loadingEval: false,
   error: "",
   animToken: 0,
   rafId: 0,
+  selectedFile: null,
 };
 
 const COLORS = {
   primary: "#1F4E79",
-  forecast: "#C2571A",
+  actual: "#1F2933",
+  chronos: "#1F4E79",
+  custom: "#C2571A",
+  baseline: "#596673",
   intervalFill: "rgba(194, 87, 26, 0.14)",
+  chronosFill: "rgba(31, 78, 121, 0.12)",
   grid: "#E4DDD3",
   plotBg: "#F6F3EE",
   sliderBg: "#E6E1D8",
@@ -30,6 +39,7 @@ const COLORS = {
 
 const intFmt = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 const dec1Fmt = new Intl.NumberFormat("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const dec2Fmt = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const dateFmt = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 
 function el(id) {
@@ -40,9 +50,8 @@ function reducedMotion() {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-// --- Formatters ---
-
 function formatDate(isoDate) {
+  if (!isoDate) return "-";
   return dateFmt.format(new Date(`${isoDate}T00:00:00Z`));
 }
 
@@ -56,14 +65,14 @@ function currentSeriesId() {
   return `${state.selectedProduct} | ${state.selectedStore}`;
 }
 
-// --- API module ---
+// --- API Helpers ---
 
-async function apiFetch(url, options) {
+async function apiFetch(url, options = {}) {
   let response;
   try {
     response = await fetch(url, options);
   } catch {
-    throw new Error("Cannot reach the server. Is it running?");
+    throw new Error("Cannot reach the server. Is it running on port 8000?");
   }
 
   let payload = null;
@@ -83,15 +92,35 @@ async function apiFetch(url, options) {
 const api = {
   getSeries: () => apiFetch("/api/series"),
   getHistory: (seriesId) => apiFetch(`/api/history?series_id=${encodeURIComponent(seriesId)}`),
-  postForecast: (seriesId, horizon) =>
+  postForecast: (seriesId, horizon, modelType) =>
     apiFetch("/api/forecast", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ series_id: seriesId, horizon }),
+      body: JSON.stringify({ series_id: seriesId, horizon, model_type: modelType }),
     }),
+  postCompare: (seriesId, horizon, cutoffIndex) =>
+    apiFetch("/api/compare", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ series_id: seriesId, horizon, cutoff_index: cutoffIndex }),
+    }),
+  getOverview: () => apiFetch("/api/overview"),
+  getDatasets: () => apiFetch("/api/datasets"),
+  getHistoryRuns: () => apiFetch("/api/history/runs"),
+  getRunDetails: (runId) => apiFetch(`/api/history/runs/${runId}`),
 };
 
-// --- State helpers ---
+function showAlert(message, type = "error") {
+  const banner = el("global-alert");
+  banner.textContent = message;
+  banner.className = `alert-banner ${type}`;
+  banner.hidden = false;
+  setTimeout(() => {
+    banner.hidden = true;
+  }, 5000);
+}
+
+// --- State Helpers ---
 
 function buildProductStoreMap(seriesIds) {
   const map = new Map();
@@ -129,7 +158,7 @@ function computeRangeWindow(rangeKey) {
   return [addDays(anchor, -backDays), endDate];
 }
 
-// --- Animations module ---
+// --- Animations ---
 
 function cancelAnimations() {
   state.animToken += 1;
@@ -163,268 +192,103 @@ function animateKpiCountUp(forecast, pctChange, token) {
   if (reducedMotion()) {
     totalEl.textContent = intFmt.format(Math.round(forecast.total));
     avgEl.textContent = dec1Fmt.format(forecast.daily_average);
-    if (pctChange === null) {
-      changeEl.textContent = "n/a";
-    } else {
-      changeEl.textContent = `${pctChange >= 0 ? "+" : ""}${dec1Fmt.format(pctChange)}%`;
-    }
+    changeEl.textContent = pctChange === null ? "n/a" : `${pctChange >= 0 ? "+" : ""}${dec1Fmt.format(pctChange)}%`;
     return;
   }
 
-  animate(0, forecast.total, {
-    duration: 0.8,
-    easing: "ease-out",
-    onUpdate: (v) => {
-      if (state.animToken !== token) return;
-      totalEl.textContent = intFmt.format(Math.round(v));
-    },
-  });
+  const durationMs = 600;
+  const start = performance.now();
+  const targetTotal = forecast.total;
+  const targetAvg = forecast.daily_average;
 
-  animate(0, forecast.daily_average, {
-    duration: 0.8,
-    easing: "ease-out",
-    onUpdate: (v) => {
-      if (state.animToken !== token) return;
-      avgEl.textContent = dec1Fmt.format(v);
-    },
-  });
+  function step(now) {
+    if (state.animToken !== token) return;
+    const progress = Math.min(1, (now - start) / durationMs);
+    const ease = 1 - Math.pow(1 - progress, 3);
 
-  if (pctChange === null) {
-    changeEl.textContent = "n/a";
-  } else {
-    animate(0, pctChange, {
-      duration: 0.8,
-      easing: "ease-out",
-      onUpdate: (v) => {
-        if (state.animToken !== token) return;
-        changeEl.textContent = `${v >= 0 ? "+" : ""}${dec1Fmt.format(v)}%`;
-      },
-    });
+    totalEl.textContent = intFmt.format(Math.round(targetTotal * ease));
+    avgEl.textContent = dec1Fmt.format(targetAvg * ease);
+
+    if (progress < 1) {
+      requestAnimationFrame(step);
+    } else {
+      totalEl.textContent = intFmt.format(Math.round(targetTotal));
+      avgEl.textContent = dec1Fmt.format(targetAvg);
+      changeEl.textContent = pctChange === null ? "n/a" : `${pctChange >= 0 ? "+" : ""}${dec1Fmt.format(pctChange)}%`;
+    }
   }
+
+  requestAnimationFrame(step);
 }
 
 function animatePanelsEntrance() {
   if (reducedMotion()) return;
-  const targets = document.querySelectorAll(".kpi-block, .chart-panel");
-  animate(
-    targets,
-    { opacity: [0.4, 1], y: [8, 0] },
-    { duration: 0.35, delay: stagger(0.06), easing: "ease-out" }
-  );
+  const targets = [el("kpi-total-value").closest(".panel"), el("kpi-avg-value").closest(".panel"), el("kpi-change-value").closest(".panel")];
+  animate(targets, { opacity: [0.75, 1], y: [6, 0] }, { duration: 0.35, delay: stagger(0.06), easing: "ease-out" });
 }
 
-function animateForecastReveal(chartEl, forecast, token) {
-  if (reducedMotion()) return;
-  const totalPts = forecast.dates.length;
-  const durationMs = 1200;
-  const start = performance.now();
+// --- Navigation ---
 
-  function frame(now) {
-    if (state.animToken !== token) return;
-    const t = Math.min(1, (now - start) / durationMs);
-    const count = Math.max(1, Math.ceil(t * totalPts));
+function initNavigation() {
+  document.querySelectorAll(".nav-tab").forEach((tab) => {
+    tab.addEventListener("click", () => switchTab(tab.dataset.tab));
+  });
 
-    Plotly.restyle(
-      chartEl,
-      {
-        x: [forecast.dates.slice(0, count)],
-        y: [forecast.median.slice(0, count)],
-      },
-      [3]
-    );
-    Plotly.restyle(chartEl, { opacity: [t] }, [2]);
-
-    if (t < 1) {
-      state.rafId = requestAnimationFrame(frame);
-    } else {
-      state.rafId = 0;
-    }
-  }
-
-  state.rafId = requestAnimationFrame(frame);
+  document.querySelectorAll("[data-jump]").forEach((btn) => {
+    btn.addEventListener("click", () => switchTab(btn.dataset.jump));
+  });
 }
 
-// --- Charts module ---
+function switchTab(tabId) {
+  state.activeTab = tabId;
+  document.querySelectorAll(".nav-tab").forEach((t) => {
+    t.classList.toggle("active", t.dataset.tab === tabId);
+  });
+  document.querySelectorAll(".view-panel").forEach((p) => {
+    p.classList.toggle("active", p.id === `view-${tabId}`);
+  });
 
-function buildChartLayout(hasForecast, forecast) {
-  const win = computeRangeWindow(state.rangeKey);
-  const layout = {
-    template: "plotly_white",
-    paper_bgcolor: "rgba(0,0,0,0)",
-    plot_bgcolor: COLORS.plotBg,
-    font: { family: "Inter, system-ui, sans-serif", size: 12, color: COLORS.text },
-    margin: { l: 58, r: 16, t: 54, b: 30 },
-    height: 440,
-    hovermode: "x unified",
-    hoverlabel: {
-      bgcolor: "#FFFFFF",
-      bordercolor: COLORS.border,
-      font: { family: "Inter, system-ui, sans-serif", size: 13, color: COLORS.text },
-    },
-    legend: {
-      orientation: "h",
-      x: 0,
-      y: 1.13,
-      font: { size: 12, color: COLORS.text },
-    },
-    xaxis: {
-      type: "date",
-      showgrid: false,
-      showspikes: false,
-      hoverformat: "%a, %d %b %Y",
-      tickfont: { size: 12, color: COLORS.tick },
-      tickformatstops: [
-        { dtickrange: [null, 1000 * 60 * 60 * 24 * 95], value: "%d %b %Y" },
-        { dtickrange: [1000 * 60 * 60 * 24 * 95, 1000 * 60 * 60 * 24 * 450], value: "%b %Y" },
-        { dtickrange: [1000 * 60 * 60 * 24 * 450, null], value: "%Y" },
-      ],
-      rangeslider: {
-        visible: true,
-        thickness: 0.05,
-        bgcolor: COLORS.sliderBg,
-        bordercolor: COLORS.border,
-        borderwidth: 1,
-      },
-    },
-    yaxis: {
-      title: { text: "Units sold", font: { size: 13, color: COLORS.text } },
-      tickfont: { size: 12, color: COLORS.tick },
-      tickformat: ",d",
-      rangemode: "tozero",
-      gridcolor: COLORS.grid,
-      zeroline: false,
-    },
-  };
-
-  if (win) {
-    layout.xaxis.range = win;
-  }
-
-  if (hasForecast && forecast) {
-    layout.shapes = [
-      {
-        type: "line",
-        x0: forecast.dates[0],
-        x1: forecast.dates[0],
-        y0: 0,
-        y1: 1,
-        yref: "paper",
-        line: { color: COLORS.tick, width: 1.2, dash: "dash" },
-      },
-    ];
-    layout.annotations = [
-      {
-        x: forecast.dates[0],
-        y: 1,
-        yref: "paper",
-        text: "Forecast start",
-        showarrow: false,
-        xanchor: "left",
-        yanchor: "bottom",
-        xshift: 4,
-        font: { size: 11, color: COLORS.tick },
-      },
-    ];
-  }
-
-  return layout;
-}
-
-function renderChart(animateReveal = false) {
-  const chartEl = el("chart");
-  if (!state.history || typeof Plotly === "undefined") return;
-
-  const hDates = state.history.dates;
-  const hSales = state.history.sales;
-  const hasForecast = Boolean(state.forecast);
-
-  const traces = [
-    {
-      x: hDates,
-      y: hSales,
-      type: "scatter",
-      mode: "lines",
-      name: "Historical sales",
-      line: { color: COLORS.primary, width: 1.6 },
-      hovertemplate: "Historical sales: %{y:,.1f} units<extra></extra>",
-    },
-  ];
-
-  if (hasForecast) {
-    const f = state.forecast;
-    const initCount = animateReveal && !reducedMotion() ? 1 : f.dates.length;
-    traces.push(
-      {
-        x: f.dates,
-        y: f.q90,
-        type: "scatter",
-        mode: "lines",
-        line: { width: 0 },
-        showlegend: false,
-        hoverinfo: "skip",
-      },
-      {
-        x: f.dates,
-        y: f.q10,
-        type: "scatter",
-        mode: "lines",
-        line: { width: 0 },
-        fill: "tonexty",
-        fillcolor: COLORS.intervalFill,
-        opacity: animateReveal && !reducedMotion() ? 0 : 1,
-        name: "80% prediction interval",
-        hoverinfo: "skip",
-      },
-      {
-        x: f.dates.slice(0, initCount),
-        y: f.median.slice(0, initCount),
-        type: "scatter",
-        mode: "lines",
-        name: "Predicted demand (median)",
-        line: { color: COLORS.forecast, width: 2.4 },
-        hovertemplate: "Predicted demand (median): %{y:,.1f} units<extra></extra>",
-      }
-    );
-  }
-
-  const layout = buildChartLayout(hasForecast, state.forecast);
-  Plotly.react(chartEl, traces, layout, { responsive: true, displaylogo: false });
-
-  if (animateReveal && hasForecast) {
-    animateForecastReveal(chartEl, state.forecast, state.animToken);
+  if (tabId === "forecasting") {
+    setTimeout(() => {
+      moveHorizonHighlight(true);
+      renderChart(false);
+    }, 50);
+  } else if (tabId === "overview") {
+    loadOverview();
+  } else if (tabId === "comparison") {
+    syncComparisonSelectors();
+  } else if (tabId === "datasets") {
+    loadDatasetsView();
+  } else if (tabId === "history") {
+    loadHistoryView();
   }
 }
 
-// --- UI module ---
+// --- Rendering: Forecasting View (Exact previous aesthetic) ---
 
 function renderControls() {
-  const productSelect = el("product-select");
-  const storeSelect = el("store-select");
-  const generateBtn = el("generate-btn");
-  const spinner = el("btn-spinner");
-  const btnLabel = el("btn-label");
   const busy = state.loadingInitial || state.loadingForecast;
+  el("product-select").disabled = busy;
+  el("store-select").disabled = busy;
+  el("model-select").disabled = busy;
+  el("generate-btn").disabled = busy || !state.selectedProduct || !state.selectedStore;
 
-  productSelect.disabled = busy;
-  storeSelect.disabled = busy;
-  generateBtn.disabled = busy || !state.selectedProduct || !state.selectedStore;
-  spinner.hidden = !state.loadingForecast;
-  btnLabel.textContent = state.loadingForecast ? "Forecasting..." : "Generate Forecast";
+  el("btn-spinner").hidden = !state.loadingForecast;
+  el("btn-label").textContent = state.loadingForecast ? "Running Inference..." : "Generate Forecast";
 
-  for (const btn of el("horizon-group").querySelectorAll("button[data-horizon]")) {
-    const checked = Number(btn.dataset.horizon) === state.horizon;
-    btn.setAttribute("aria-checked", String(checked));
-    btn.tabIndex = checked ? 0 : -1;
+  const buttons = el("horizon-group").querySelectorAll("button[data-horizon]");
+  buttons.forEach((btn) => {
+    const val = Number(btn.dataset.horizon);
+    const active = val === state.horizon;
+    btn.setAttribute("aria-checked", String(active));
+    btn.tabIndex = active ? 0 : -1;
     btn.disabled = busy;
-  }
+  });
 
-  for (const btn of el("range-group").querySelectorAll("button[data-range]")) {
+  const rangeButtons = el("range-group").querySelectorAll("button[data-range]");
+  rangeButtons.forEach((btn) => {
     btn.setAttribute("aria-pressed", String(btn.dataset.range === state.rangeKey));
-    btn.disabled = busy || !state.history;
-  }
-
-  el("chart-skeleton").hidden = !state.loadingForecast;
-  document.querySelector("main").setAttribute("aria-busy", String(busy));
+  });
 }
 
 function renderStatus() {
@@ -440,8 +304,6 @@ function renderStatus() {
     summaryEl.textContent =
       `${formatDate(s.start)} to ${formatDate(s.end)} | ${intFmt.format(s.days)} days | ` +
       `${intFmt.format(s.zero_days)} zero-sales days kept | ${intFmt.format(s.missing_days)} missing days`;
-  } else {
-    summaryEl.textContent = "";
   }
 
   loadingEl.hidden = !state.loadingForecast;
@@ -451,30 +313,29 @@ function renderStatus() {
     errorEl.textContent = state.error;
     errorEl.hidden = false;
   } else {
-    errorEl.textContent = "";
     errorEl.hidden = true;
   }
 }
 
-function renderKpis(animateValues = false) {
-  const n = state.forecast ? state.forecast.dates.length : state.horizon;
-  el("kpi-total-label").textContent = `Total predicted demand (${n} days)`;
-  el("kpi-change-label").textContent = `vs previous ${n} days`;
+function renderKpis(animateCount = false) {
+  el("kpi-total-label").textContent = `Total predicted demand (${state.horizon} days)`;
+  const totalUnit = el("kpi-total-unit");
+  const avgUnit = el("kpi-avg-unit");
 
   if (!state.forecast) {
     el("kpi-total-value").textContent = "-";
     el("kpi-avg-value").textContent = "-";
     el("kpi-change-value").textContent = "-";
-    el("kpi-total-unit").hidden = true;
-    el("kpi-avg-unit").hidden = true;
+    totalUnit.hidden = true;
+    avgUnit.hidden = true;
     return;
   }
 
-  el("kpi-total-unit").hidden = false;
-  el("kpi-avg-unit").hidden = false;
+  totalUnit.hidden = false;
+  avgUnit.hidden = false;
   const pct = computePrevPeriodChange(state.history, state.forecast);
 
-  if (animateValues) {
+  if (animateCount) {
     animateKpiCountUp(state.forecast, pct, state.animToken);
   } else {
     el("kpi-total-value").textContent = intFmt.format(Math.round(state.forecast.total));
@@ -509,6 +370,109 @@ function renderStrip() {
   el("strip-peak").textContent = `${formatDate(f.dates[peakIdx])} (${dec1Fmt.format(f.median[peakIdx])} units)`;
 }
 
+function buildChartLayout(hasForecast) {
+  const win = computeRangeWindow(state.rangeKey);
+  const layout = {
+    paper_bgcolor: "rgba(0,0,0,0)",
+    plot_bgcolor: COLORS.plotBg,
+    font: { family: "Inter, system-ui, sans-serif", size: 12, color: COLORS.text },
+    margin: { l: 58, r: 16, t: 36, b: 30 },
+    height: 440,
+    showlegend: true,
+    legend: { orientation: "h", x: 0, y: 1.12, font: { size: 11 } },
+    hovermode: "x unified",
+    xaxis: {
+      type: "date",
+      showgrid: true,
+      gridcolor: COLORS.grid,
+      gridwidth: 1,
+      zeroline: false,
+      tickcolor: COLORS.border,
+      tickfont: { color: COLORS.tick, size: 11 },
+      rangeslider: { visible: false },
+    },
+    yaxis: {
+      title: { text: "Units", font: { size: 12, color: COLORS.tick } },
+      showgrid: true,
+      gridcolor: COLORS.grid,
+      gridwidth: 1,
+      zeroline: true,
+      zerolinecolor: COLORS.border,
+      rangemode: "tozero",
+      tickfont: { color: COLORS.tick, size: 11 },
+    },
+  };
+
+  if (win) {
+    layout.xaxis.range = [win[0], win[1]];
+  }
+  return layout;
+}
+
+function renderChart(animateReveal = false) {
+  const chartEl = el("chart");
+  if (!state.history || typeof Plotly === "undefined") return;
+
+  const hDates = state.history.dates;
+  const hSales = state.history.sales;
+  const hasForecast = Boolean(state.forecast);
+
+  const traces = [
+    {
+      x: hDates,
+      y: hSales,
+      type: "scatter",
+      mode: "lines",
+      name: "Actual daily sales",
+      line: { color: COLORS.primary, width: 1.8 },
+      hovertemplate: "Actual sales: %{y:,.0f} units<extra></extra>",
+    },
+  ];
+
+  if (hasForecast) {
+    const f = state.forecast;
+    const modelColor = state.selectedModel === "custom" ? COLORS.custom : COLORS.chronos;
+    const modelName = state.selectedModel === "custom" ? "Custom Model" : state.selectedModel === "baseline" ? "Baseline" : "Chronos-2";
+
+    traces.push(
+      {
+        x: f.dates,
+        y: f.q90,
+        type: "scatter",
+        mode: "lines",
+        name: "80% interval (high)",
+        line: { color: "transparent", width: 0 },
+        showlegend: false,
+        hoverinfo: "skip",
+      },
+      {
+        x: f.dates,
+        y: f.q10,
+        type: "scatter",
+        mode: "lines",
+        fill: "tonexty",
+        fillcolor: COLORS.intervalFill,
+        name: "80% prediction interval",
+        line: { color: "transparent", width: 0 },
+        hovertemplate: "Interval: %{y:,.1f} - %{customdata:,.1f}<extra></extra>",
+        customdata: f.q90,
+      },
+      {
+        x: f.dates,
+        y: f.median,
+        type: "scatter",
+        mode: "lines",
+        name: `${modelName} (median)`,
+        line: { color: COLORS.custom, width: 2.4 },
+        hovertemplate: `${modelName}: %{y:,.1f} units<extra></extra>`,
+      }
+    );
+  }
+
+  const layout = buildChartLayout(hasForecast);
+  Plotly.react(chartEl, traces, layout, { responsive: true, displaylogo: false });
+}
+
 function renderTable() {
   const tbody = el("forecast-tbody");
   const dlBtn = el("download-csv-btn");
@@ -516,13 +480,7 @@ function renderTable() {
 
   if (!state.forecast) {
     dlBtn.disabled = true;
-    const tr = document.createElement("tr");
-    const td = document.createElement("td");
-    td.colSpan = 5;
-    td.className = "muted-cell";
-    td.textContent = "Generate a forecast to view daily values.";
-    tr.appendChild(td);
-    tbody.appendChild(tr);
+    tbody.innerHTML = `<tr><td colspan="5" class="muted-cell">Generate a forecast to view daily values.</td></tr>`;
     return;
   }
 
@@ -530,35 +488,39 @@ function renderTable() {
   const f = state.forecast;
   for (let i = 0; i < f.dates.length; i += 1) {
     const tr = document.createElement("tr");
-    const cells = [
-      { text: formatDate(f.dates[i]), cls: "" },
-      { text: dec1Fmt.format(f.median[i]), cls: "num" },
-      { text: dec1Fmt.format(f.expected[i]), cls: "num" },
-      { text: dec1Fmt.format(f.q10[i]), cls: "num" },
-      { text: dec1Fmt.format(f.q90[i]), cls: "num" },
-    ];
-    for (const c of cells) {
-      const td = document.createElement("td");
-      if (c.cls) td.className = c.cls;
-      td.textContent = c.text;
-      tr.appendChild(td);
-    }
+    tr.innerHTML = `
+      <td>${formatDate(f.dates[i])}</td>
+      <td class="num">${dec1Fmt.format(f.median[i])}</td>
+      <td class="num">${dec1Fmt.format(f.expected[i])}</td>
+      <td class="num">${dec1Fmt.format(f.q10[i])}</td>
+      <td class="num">${dec1Fmt.format(f.q90[i])}</td>
+    `;
     tbody.appendChild(tr);
   }
 }
 
 function renderAbout() {
   const pill = el("device-pill");
+  const aboutModel = el("about-model");
+  const aboutMethod = el("about-method");
+
+  if (state.selectedModel === "custom") {
+    aboutModel.textContent = "Custom Model (Recursive Multi-Quantile)";
+    aboutMethod.textContent = "Frequency-aware lag & rolling features with Q10, Q50, Q90 quantile regression";
+  } else if (state.selectedModel === "baseline") {
+    aboutModel.textContent = "Seasonal Baseline (Lag 7 Seasonal-Naive)";
+    aboutMethod.textContent = "Empirical seasonal benchmark";
+  } else {
+    aboutModel.textContent = "Amazon Chronos-2 (amazon/chronos-2)";
+    aboutMethod.textContent = "Pretrained 120M foundation model, zero-shot";
+  }
+
   if (state.forecast) {
-    const dev = String(state.forecast.device || "-").toUpperCase();
-    el("about-model").textContent = `Amazon Chronos-2 (${state.forecast.model})`;
+    const dev = String(state.forecast.device || "CPU").toUpperCase();
     el("about-device").textContent = dev;
     pill.textContent = dev;
-    pill.hidden = false;
   } else {
-    el("about-model").textContent = "Amazon Chronos-2 (amazon/chronos-2)";
     el("about-device").textContent = "-";
-    pill.hidden = true;
   }
 }
 
@@ -575,15 +537,49 @@ function renderAll(options = {}) {
   }
 }
 
+// --- Inline Model Evaluation Controller ---
+
+async function handleRunEvaluation() {
+  if (!state.selectedProduct || !state.selectedStore) return;
+  const btn = el("run-eval-btn");
+  btn.disabled = true;
+  btn.textContent = "Evaluating...";
+
+  try {
+    const hist = await api.getHistory(currentSeriesId());
+    const len = hist.dates.length;
+    const cutoff = Math.max(30, len - state.horizon);
+
+    const comp = await api.postCompare(currentSeriesId(), state.horizon, cutoff);
+    const modelKey = state.selectedModel === "custom" ? "custom" : state.selectedModel === "baseline" ? "baseline" : "chronos";
+    const m = comp.metrics[modelKey] || comp.metrics.chronos || {};
+
+    el("eval-mae").textContent = m.mae !== undefined ? dec2Fmt.format(m.mae) : "-";
+    el("eval-rmse").textContent = m.rmse !== undefined ? dec2Fmt.format(m.rmse) : "-";
+    el("eval-wape").textContent = m.wape !== undefined ? (m.wape * 100).toFixed(1) + "%" : "-";
+    el("eval-mase").textContent = m.mase !== undefined ? dec2Fmt.format(m.mase) : "-";
+    el("eval-bias").textContent = m.bias !== undefined ? (m.bias * 100).toFixed(1) + "%" : "-";
+    el("eval-coverage").textContent = m.coverage_80 !== undefined ? (m.coverage_80 * 100).toFixed(1) + "%" : "-";
+    el("eval-width").textContent = m.mean_interval_width !== undefined ? dec1Fmt.format(m.mean_interval_width) : "-";
+
+    el("eval-note").textContent = `Evaluated against ${state.horizon}-day holdout window (${comp.actual_test_dates[0]} to ${comp.actual_test_dates[comp.actual_test_dates.length - 1]}).`;
+    showAlert("Evaluation completed successfully against ground truth window.", "success");
+  } catch (err) {
+    showAlert("Evaluation failed: " + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Evaluate on Historical Context";
+  }
+}
+
+// --- Selectors & History Loading ---
+
 function populateProducts() {
   const select = el("product-select");
   select.textContent = "";
   const products = Array.from(state.seriesByProduct.keys()).sort();
   for (const product of products) {
-    const opt = document.createElement("option");
-    opt.value = product;
-    opt.textContent = product;
-    select.appendChild(opt);
+    select.appendChild(new Option(product, product));
   }
   state.selectedProduct = products[0] || "";
   select.value = state.selectedProduct;
@@ -594,18 +590,13 @@ function populateStores() {
   select.textContent = "";
   const stores = (state.seriesByProduct.get(state.selectedProduct) || []).slice().sort();
   for (const store of stores) {
-    const opt = document.createElement("option");
-    opt.value = store;
-    opt.textContent = store;
-    select.appendChild(opt);
+    select.appendChild(new Option(store, store));
   }
   if (!stores.includes(state.selectedStore)) {
     state.selectedStore = stores[0] || "";
   }
   select.value = state.selectedStore;
 }
-
-// --- Events & Actions ---
 
 async function loadSelectedHistory() {
   if (!state.selectedProduct || !state.selectedStore) return;
@@ -634,7 +625,7 @@ async function handleGenerateForecast() {
   renderStatus();
 
   try {
-    const res = await api.postForecast(currentSeriesId(), state.horizon);
+    const res = await api.postForecast(currentSeriesId(), state.horizon, state.selectedModel);
     if (state.animToken !== token) return;
     state.forecast = res;
     state.rangeKey = "6M";
@@ -673,7 +664,409 @@ function selectHorizon(newHorizon) {
   moveHorizonHighlight(false);
 }
 
+// --- Overview (Monosphere UI) Controller ---
+
+async function loadOverview() {
+  try {
+    const data = await api.getOverview();
+    el("ov-series").textContent = intFmt.format(data.total_series || 75);
+    el("ov-records").textContent = intFmt.format(data.total_records || 143475);
+    el("ov-device").textContent = String(data.device || "CPU").toUpperCase();
+
+    const tbody = el("ov-recent-tbody");
+    tbody.innerHTML = "";
+    if (!data.recent_runs || data.recent_runs.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" class="muted-cell">No experiments recorded yet.</td></tr>`;
+      return;
+    }
+    data.recent_runs.forEach((r) => {
+      const tr = document.createElement("tr");
+      const modelDisp = r.model_type === "custom" || r.model_type === "lightgbm" ? "Custom Model" : r.model_type.toUpperCase();
+      tr.innerHTML = `
+        <td><code>${r.id}</code></td>
+        <td><strong>${modelDisp}</strong></td>
+        <td>${r.series_id}</td>
+        <td class="num">${r.horizon}d</td>
+        <td class="num">${r.execution_time_sec !== undefined ? r.execution_time_sec + "s" : "-"}</td>
+        <td>${new Date(r.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch {
+    // fallback
+  }
+}
+
+// --- Model Comparison Controller ---
+
+function syncComparisonSelectors() {
+  const pSelect = el("cmp-product-select");
+  const sSelect = el("cmp-store-select");
+  pSelect.innerHTML = "";
+  sSelect.innerHTML = "";
+
+  const products = Array.from(state.seriesByProduct.keys()).sort();
+  products.forEach((p) => pSelect.appendChild(new Option(p, p)));
+  pSelect.value = state.selectedProduct || products[0] || "";
+
+  const updateStores = () => {
+    sSelect.innerHTML = "";
+    const stores = (state.seriesByProduct.get(pSelect.value) || []).slice().sort();
+    stores.forEach((s) => sSelect.appendChild(new Option(s, s)));
+    sSelect.value = state.selectedStore || stores[0] || "";
+  };
+
+  updateStores();
+  pSelect.onchange = updateStores;
+}
+
+async function handleRunComparison() {
+  const p = el("cmp-product-select").value;
+  const s = el("cmp-store-select").value;
+  const sid = `${p} | ${s}`;
+  const horizon = state.horizon;
+  const mode = el("cmp-mode-select").value;
+
+  const btn = el("cmp-run-btn");
+  const spinner = el("cmp-spinner");
+  btn.disabled = true;
+  spinner.hidden = false;
+  el("cmp-status-text").textContent = "Running side-by-side comparison across all 3 model engines...";
+
+  try {
+    let cutoff = undefined;
+    if (mode === "historical") {
+      const hist = await api.getHistory(sid);
+      cutoff = Math.max(30, hist.dates.length - horizon);
+    }
+
+    const comp = await api.postCompare(sid, horizon, cutoff);
+    renderComparisonChart(comp);
+    renderComparisonTable(comp);
+    el("cmp-status-text").textContent = `Comparison complete for ${sid} across ${horizon} days.`;
+  } catch (err) {
+    showAlert("Comparison error: " + err.message);
+    el("cmp-status-text").textContent = "Comparison encountered an error.";
+  } finally {
+    btn.disabled = false;
+    spinner.hidden = true;
+  }
+}
+
+function renderComparisonChart(data) {
+  const chartEl = el("cmp-chart");
+  if (typeof Plotly === "undefined") return;
+
+  const traces = [];
+
+  if (data.has_ground_truth && data.actual_test_dates.length > 0) {
+    traces.push({
+      x: data.actual_test_dates,
+      y: data.actual_test_values,
+      type: "scatter",
+      mode: "lines+markers",
+      name: "Actual Demand",
+      line: { color: COLORS.actual, width: 2.2 },
+      marker: { size: 5 },
+    });
+  }
+
+  const modelMap = {
+    chronos: { name: "Chronos-2 (Zero-Shot)", color: COLORS.chronos, dash: "solid" },
+    custom: { name: "Custom Model", color: COLORS.custom, dash: "solid" },
+    lightgbm: { name: "Custom Model", color: COLORS.custom, dash: "solid" },
+    baseline: { name: "Seasonal Baseline", color: COLORS.baseline, dash: "dash" },
+  };
+
+  for (const [key, fc] of Object.entries(data.forecasts)) {
+    if (!fc || fc.error || !fc.median) continue;
+    const info = modelMap[key] || { name: key, color: COLORS.custom, dash: "solid" };
+
+    traces.push({
+      x: fc.dates,
+      y: fc.median,
+      type: "scatter",
+      mode: "lines",
+      name: info.name,
+      line: { color: info.color, width: 2.2, dash: info.dash },
+    });
+
+    if (fc.q10 && fc.q90 && key !== "baseline") {
+      traces.push(
+        {
+          x: fc.dates,
+          y: fc.q90,
+          type: "scatter",
+          mode: "lines",
+          line: { color: "transparent" },
+          showlegend: false,
+          hoverinfo: "skip",
+        },
+        {
+          x: fc.dates,
+          y: fc.q10,
+          type: "scatter",
+          mode: "lines",
+          fill: "tonexty",
+          fillcolor: key === "chronos" ? COLORS.chronosFill : COLORS.intervalFill,
+          line: { color: "transparent" },
+          name: `${info.name} 80% Interval`,
+        }
+      );
+    }
+  }
+
+  const layout = {
+    paper_bgcolor: "rgba(0,0,0,0)",
+    plot_bgcolor: COLORS.plotBg,
+    margin: { l: 58, r: 16, t: 36, b: 30 },
+    height: 440,
+    font: { family: "Inter, sans-serif", size: 12 },
+    xaxis: { gridcolor: COLORS.grid },
+    yaxis: { gridcolor: COLORS.grid, title: "Units" },
+    legend: { orientation: "h", y: 1.12, x: 0 },
+  };
+
+  Plotly.react(chartEl, traces, layout, { responsive: true, displaylogo: false });
+}
+
+function renderComparisonTable(data) {
+  const tbody = el("cmp-metrics-tbody");
+  tbody.innerHTML = "";
+
+  const best = data.best_models || {};
+  const displayNames = {
+    chronos: "Amazon Chronos-2",
+    custom: "Custom Model",
+    lightgbm: "Custom Model",
+    baseline: "Seasonal Baseline",
+  };
+
+  for (const [mkey, m] of Object.entries(data.metrics)) {
+    if (!m) continue;
+    const name = displayNames[mkey] || mkey;
+    const tr = document.createElement("tr");
+
+    const badgeMae = best.mae === mkey ? `<span class="badge-best">Best MAE</span>` : "";
+    const badgeWape = best.wape === mkey ? `<span class="badge-best">Best WAPE</span>` : "";
+
+    tr.innerHTML = `
+      <td><strong>${name}</strong> ${badgeMae} ${badgeWape}</td>
+      <td class="num">${m.mae !== undefined ? dec2Fmt.format(m.mae) : "-"}</td>
+      <td class="num">${m.rmse !== undefined ? dec2Fmt.format(m.rmse) : "-"}</td>
+      <td class="num">${m.wape !== undefined ? (m.wape * 100).toFixed(1) + "%" : "-"}</td>
+      <td class="num">${m.mase !== undefined ? dec2Fmt.format(m.mase) : "-"}</td>
+      <td class="num">${m.bias !== undefined ? (m.bias * 100).toFixed(1) + "%" : "-"}</td>
+      <td class="num">${m.pinball_loss !== undefined ? dec2Fmt.format(m.pinball_loss) : "-"}</td>
+      <td class="num">${m.coverage_80 !== undefined ? (m.coverage_80 * 100).toFixed(1) + "%" : "-"}</td>
+      <td class="num">${m.mean_interval_width !== undefined ? dec1Fmt.format(m.mean_interval_width) : "-"}</td>
+      <td class="num">${m.execution_time_sec !== undefined ? m.execution_time_sec + "s" : "-"}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+// --- Data Management Controller ---
+
+async function loadDatasetsView() {
+  try {
+    const list = await api.getDatasets();
+    const tbody = el("ds-list-tbody");
+    tbody.innerHTML = "";
+    list.forEach((d) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><strong>${d.name}</strong><br><small class="text-muted"><code>${d.id}</code></small></td>
+        <td>v${d.version_num}</td>
+        <td class="num">${intFmt.format(d.num_records)}</td>
+        <td class="num">${d.num_series}</td>
+        <td>${d.date_start} to ${d.date_end}</td>
+        <td><span class="pill">${d.quality_report ? d.quality_report.quality_status : "HEALTHY"}</span></td>
+      `;
+      tr.onclick = () => showDatasetQuality(d);
+      tbody.appendChild(tr);
+    });
+  } catch (err) {
+    showAlert(err.message);
+  }
+}
+
+function showDatasetQuality(ds) {
+  const card = el("ds-quality-card");
+  const content = el("ds-quality-content");
+  if (!ds.quality_report) {
+    card.hidden = true;
+    return;
+  }
+  const q = ds.quality_report;
+  card.hidden = false;
+  content.innerHTML = `
+    <div><dt>Zero-Sales Days</dt><dd>${intFmt.format(q.zero_sales_count)}</dd></div>
+    <div><dt>Negative Observations</dt><dd>${q.negative_sales_count}</dd></div>
+    <div><dt>Duplicates Aggregated</dt><dd>${q.duplicate_count}</dd></div>
+    <div><dt>Timeline Gaps</dt><dd>${q.gap_count}</dd></div>
+  `;
+}
+
+function initDatasetWizard() {
+  const dropZone = el("file-drop-zone");
+  const fileInput = el("file-input");
+
+  dropZone.onclick = () => fileInput.click();
+  dropZone.ondragover = (e) => {
+    e.preventDefault();
+    dropZone.classList.add("dragover");
+  };
+  dropZone.ondragleave = () => dropZone.classList.remove("dragover");
+  dropZone.ondrop = (e) => {
+    e.preventDefault();
+    dropZone.classList.remove("dragover");
+    if (e.dataTransfer.files.length > 0) handleFileSelected(e.dataTransfer.files[0]);
+  };
+  fileInput.onchange = (e) => {
+    if (e.target.files.length > 0) handleFileSelected(e.target.files[0]);
+  };
+  el("import-form").onsubmit = handleImportSubmit;
+}
+
+async function handleFileSelected(file) {
+  state.selectedFile = file;
+  el("file-info-bar").hidden = false;
+  el("file-name-lbl").textContent = file.name;
+  el("file-size-lbl").textContent = `${(file.size / 1024).toFixed(1)} KB`;
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  try {
+    const meta = await apiFetch("/api/datasets/inspect", { method: "POST", body: formData });
+    const timeSelect = el("map-time-select");
+    const targetSelect = el("map-target-select");
+    timeSelect.innerHTML = "";
+    targetSelect.innerHTML = "";
+
+    meta.columns.forEach((c) => {
+      timeSelect.appendChild(new Option(c, c, false, c === meta.suggested_time_col));
+      targetSelect.appendChild(new Option(c, c, false, c === meta.suggested_target_col));
+    });
+
+    el("map-series-input").value = (meta.suggested_series_cols || []).join(", ");
+    el("map-covariates-input").value = (meta.suggested_covariates || []).join(", ");
+    el("ds-name-input").value = file.name.replace(/\.[^/.]+$/, "").replace(/_/g, " ");
+    el("import-form").hidden = false;
+  } catch (err) {
+    showAlert("File inspection failed: " + err.message);
+  }
+}
+
+async function handleImportSubmit(e) {
+  e.preventDefault();
+  if (!state.selectedFile) return;
+
+  const btn = el("wiz-submit-btn");
+  const spinner = el("wiz-spinner");
+  btn.disabled = true;
+  spinner.hidden = false;
+
+  const formData = new FormData();
+  formData.append("file", state.selectedFile);
+  formData.append("dataset_name", el("ds-name-input").value);
+  formData.append("time_col", el("map-time-select").value);
+  formData.append("target_col", el("map-target-select").value);
+  formData.append("series_cols", el("map-series-input").value);
+  formData.append("covariates", el("map-covariates-input").value);
+  formData.append("frequency", el("map-freq-select").value);
+
+  try {
+    const res = await apiFetch("/api/datasets/import", { method: "POST", body: formData });
+    showAlert(`Dataset '${res.dataset_name}' (v${res.version_num}) imported successfully!`, "success");
+    el("import-form").reset();
+    el("import-form").hidden = true;
+    el("file-info-bar").hidden = true;
+    state.selectedFile = null;
+    await loadDatasetsView();
+  } catch (err) {
+    showAlert("Import failed: " + err.message);
+  } finally {
+    btn.disabled = false;
+    spinner.hidden = true;
+  }
+}
+
+// --- Forecast History Controller ---
+
+async function loadHistoryView() {
+  try {
+    const runs = await api.getHistoryRuns();
+    const tbody = el("hist-runs-tbody");
+    tbody.innerHTML = "";
+    if (runs.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="8" class="muted-cell">No archived runs found.</td></tr>`;
+      return;
+    }
+    runs.forEach((r) => {
+      const tr = document.createElement("tr");
+      const modelDisp = r.model_type === "custom" || r.model_type === "lightgbm" ? "Custom Model" : r.model_type.toUpperCase();
+      tr.innerHTML = `
+        <td><code>${r.id}</code></td>
+        <td><strong>${modelDisp}</strong></td>
+        <td><small>${r.model_id}</small></td>
+        <td>${r.series_id}</td>
+        <td class="num">${r.horizon}</td>
+        <td class="num">${r.execution_time_sec !== undefined ? r.execution_time_sec + "s" : "-"}</td>
+        <td>${new Date(r.created_at).toLocaleDateString()}</td>
+        <td><button type="button" class="btn-secondary" data-inspect-run="${r.id}">Inspect</button></td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    tbody.querySelectorAll("[data-inspect-run]").forEach((b) => {
+      b.onclick = () => inspectRun(b.dataset.inspectRun);
+    });
+  } catch (err) {
+    showAlert(err.message);
+  }
+}
+
+async function inspectRun(runId) {
+  try {
+    const run = await api.getRunDetails(runId);
+    el("modal-run-title").textContent = `Forecast Run: ${run.id} (${run.model_type.toUpperCase()})`;
+    el("hist-modal").hidden = false;
+
+    const dates = run.values.map((v) => v.timestamp);
+    const median = run.values.map((v) => v.predicted_median);
+    const q10 = run.values.map((v) => v.lower_bound);
+    const q90 = run.values.map((v) => v.upper_bound);
+
+    const traces = [
+      { x: dates, y: q90, type: "scatter", mode: "lines", line: { color: "transparent" }, showlegend: false },
+      { x: dates, y: q10, type: "scatter", mode: "lines", fill: "tonexty", fillcolor: COLORS.intervalFill, line: { color: "transparent" }, name: "80% Interval" },
+      { x: dates, y: median, type: "scatter", mode: "lines+markers", name: "Predicted Demand", line: { color: COLORS.custom, width: 2.2 } },
+    ];
+
+    const layout = {
+      paper_bgcolor: "rgba(0,0,0,0)",
+      plot_bgcolor: COLORS.plotBg,
+      margin: { l: 50, r: 16, t: 20, b: 36 },
+      height: 420,
+      font: { family: "Inter, sans-serif", size: 12 },
+      xaxis: { gridcolor: COLORS.grid },
+      yaxis: { gridcolor: COLORS.grid, title: "Units" },
+    };
+
+    Plotly.react("modal-chart", traces, layout, { responsive: true, displaylogo: false });
+  } catch (err) {
+    showAlert(err.message);
+  }
+}
+
+// --- Setup & Bootstrap ---
+
 function setupEvents() {
+  initNavigation();
+  initDatasetWizard();
+
   el("product-select").addEventListener("change", (e) => {
     state.selectedProduct = e.target.value;
     populateStores();
@@ -683,6 +1076,11 @@ function setupEvents() {
   el("store-select").addEventListener("change", (e) => {
     state.selectedStore = e.target.value;
     loadSelectedHistory();
+  });
+
+  el("model-select").addEventListener("change", (e) => {
+    state.selectedModel = e.target.value;
+    renderAbout();
   });
 
   const horizonGroup = el("horizon-group");
@@ -715,11 +1113,26 @@ function setupEvents() {
   });
 
   el("generate-btn").addEventListener("click", handleGenerateForecast);
-
+  el("run-eval-btn").addEventListener("click", handleRunEvaluation);
   el("download-csv-btn").addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
     downloadForecastCsv();
+  });
+
+  // Comparison events
+  el("cmp-horizon-group").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-horizon]");
+    if (!btn) return;
+    el("cmp-horizon-group").querySelectorAll("button").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    state.horizon = Number(btn.dataset.horizon);
+  });
+  el("cmp-run-btn").addEventListener("click", handleRunComparison);
+
+  // Modal events
+  el("modal-close-btn").addEventListener("click", () => {
+    el("hist-modal").hidden = true;
   });
 
   window.addEventListener("resize", () => moveHorizonHighlight(true));

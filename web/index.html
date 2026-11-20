@@ -6,172 +6,568 @@
   <title>Retail Product Demand Forecasting</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css?v=4">
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" defer></script>
-  <script type="module" src="app.js"></script>
+  <script type="module" src="app.js?v=4"></script>
 </head>
 <body>
   <div class="page">
     <header class="topbar">
       <h1>Retail Product Demand Forecasting</h1>
       <div class="topbar-pills">
-        <span class="pill">Forecasts by Amazon Chronos-2</span>
-        <span id="device-pill" class="pill pill-device" hidden></span>
+        <span class="pill">Forecasts by Amazon Chronos-2 &amp; Custom Model</span>
+        <span id="device-pill" class="pill pill-device">CPU</span>
       </div>
     </header>
 
+    <!-- Neumorphic Navigation Tabs -->
+    <nav class="main-nav" aria-label="Main Navigation">
+      <button type="button" class="nav-tab active" data-tab="forecasting">Forecasting</button>
+      <button type="button" class="nav-tab" data-tab="overview">Overview</button>
+      <button type="button" class="nav-tab" data-tab="comparison">Model Comparison</button>
+      <button type="button" class="nav-tab" data-tab="datasets">Data Management</button>
+      <button type="button" class="nav-tab" data-tab="history">Forecasting History</button>
+    </nav>
+
+    <!-- Global Notification Banner -->
+    <div id="global-alert" class="alert-banner" role="alert" hidden></div>
+
     <main>
-      <section class="panel controls-panel" aria-label="Forecast controls">
-        <div class="controls-grid">
-          <div class="field">
-            <label for="product-select" class="section-label">Product</label>
-            <div class="select-wrap">
-              <select id="product-select" disabled>
-                <option value="">Loading products...</option>
-              </select>
+
+      <!-- ================= 1. PRIMARY FORECASTING VIEW ================= -->
+      <section id="view-forecasting" class="view-panel active">
+        <section class="panel controls-panel" aria-label="Forecast controls">
+          <div class="controls-grid">
+            <div class="field">
+              <label for="product-select" class="section-label">Product</label>
+              <div class="select-wrap">
+                <select id="product-select" disabled>
+                  <option value="">Loading products...</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="store-select" class="section-label">Store</label>
+              <div class="select-wrap">
+                <select id="store-select" disabled>
+                  <option value="">Loading stores...</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Model Selection Addition -->
+            <div class="field">
+              <label for="model-select" class="section-label">Model</label>
+              <div class="select-wrap">
+                <select id="model-select">
+                  <option value="chronos">Amazon Chronos-2 (Zero-Shot)</option>
+                  <option value="custom">Custom Model (Recursive Multi-Quantile)</option>
+                  <option value="baseline">Seasonal Baseline</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="field">
+              <span id="horizon-label" class="section-label">Horizon (days)</span>
+              <div id="horizon-group" class="segmented" role="radiogroup" aria-labelledby="horizon-label">
+                <span id="horizon-highlight" class="segmented-highlight" aria-hidden="true"></span>
+                <button type="button" role="radio" aria-checked="false" data-horizon="7" tabindex="-1">7</button>
+                <button type="button" role="radio" aria-checked="false" data-horizon="14" tabindex="-1">14</button>
+                <button type="button" role="radio" aria-checked="true" data-horizon="28" tabindex="0">28</button>
+                <button type="button" role="radio" aria-checked="false" data-horizon="56" tabindex="-1">56</button>
+                <button type="button" role="radio" aria-checked="false" data-horizon="90" tabindex="-1">90</button>
+              </div>
+            </div>
+
+            <div class="field field-action">
+              <button id="generate-btn" type="button" class="btn-primary" disabled>
+                <span id="btn-spinner" class="spinner" aria-hidden="true" hidden></span>
+                <span id="btn-label">Generate Forecast</span>
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <div class="status-bar" aria-live="polite">
+          <p id="data-summary" class="summary-line">Loading products...</p>
+          <p id="loading-text" class="loading-text" hidden>Running forecast inference...</p>
+          <p id="empty-hint" class="empty-hint">Select a product and click Generate Forecast</p>
+          <div id="error-banner" class="error-banner" role="alert" hidden></div>
+        </div>
+
+        <section class="kpi-row" aria-label="Forecast summary">
+          <div class="panel kpi-block">
+            <div id="kpi-total-label" class="section-label">Total predicted demand (28 days)</div>
+            <div class="kpi-value-row">
+              <span id="kpi-total-value" class="kpi-value">-</span>
+              <span id="kpi-total-unit" class="kpi-unit" hidden>units</span>
+            </div>
+          </div>
+          <div class="panel kpi-block">
+            <div class="section-label">Average daily predicted demand</div>
+            <div class="kpi-value-row">
+              <span id="kpi-avg-value" class="kpi-value">-</span>
+              <span id="kpi-avg-unit" class="kpi-unit" hidden>units/day</span>
+            </div>
+          </div>
+          <div class="panel kpi-block">
+            <div id="kpi-change-label" class="section-label">vs previous 28 days</div>
+            <div class="kpi-value-row">
+              <span id="kpi-change-value" class="kpi-value">-</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel chart-panel" aria-label="Demand chart">
+          <div class="chart-header">
+            <div class="chart-strip" aria-label="Series dates and peak">
+              <div class="strip-item">
+                <span class="strip-label">Last actual day</span>
+                <span id="strip-last-actual" class="strip-val">-</span>
+              </div>
+              <div class="strip-item">
+                <span class="strip-label">Forecast period</span>
+                <span id="strip-period" class="strip-val">-</span>
+              </div>
+              <div class="strip-item">
+                <span class="strip-label">Peak forecast day</span>
+                <span id="strip-peak" class="strip-val">-</span>
+              </div>
+            </div>
+
+            <div id="range-group" class="range-buttons" role="group" aria-label="Chart zoom range">
+              <button type="button" class="range-btn" data-range="1M">1M</button>
+              <button type="button" class="range-btn" data-range="3M">3M</button>
+              <button type="button" class="range-btn" data-range="6M">6M</button>
+              <button type="button" class="range-btn" data-range="1Y">1Y</button>
+              <button type="button" class="range-btn" data-range="ALL" aria-pressed="true">All</button>
             </div>
           </div>
 
-          <div class="field">
-            <label for="store-select" class="section-label">Store</label>
-            <div class="select-wrap">
-              <select id="store-select" disabled>
-                <option value="">Loading stores...</option>
-              </select>
+          <div class="chart-stage">
+            <div id="chart-skeleton" class="chart-skeleton" hidden aria-hidden="true"></div>
+            <div id="chart" class="chart-container"></div>
+          </div>
+        </section>
+
+        <!-- Model Evaluation Section on this Page -->
+        <details id="eval-section" class="panel details-panel" open>
+          <summary class="details-summary">
+            <span>Model Evaluation &amp; Accuracy Metrics</span>
+            <button id="run-eval-btn" type="button" class="btn-secondary">Evaluate on Historical Context</button>
+          </summary>
+          <div class="eval-content-wrap">
+            <div class="eval-metrics-grid">
+              <div class="eval-metric-box">
+                <span class="eval-label">MAE</span>
+                <strong id="eval-mae" class="eval-num">-</strong>
+                <span class="eval-sub">Mean Absolute Error</span>
+              </div>
+              <div class="eval-metric-box">
+                <span class="eval-label">RMSE</span>
+                <strong id="eval-rmse" class="eval-num">-</strong>
+                <span class="eval-sub">Root Mean Squared</span>
+              </div>
+              <div class="eval-metric-box">
+                <span class="eval-label">WAPE</span>
+                <strong id="eval-wape" class="eval-num">-</strong>
+                <span class="eval-sub">Weighted Abs % Error</span>
+              </div>
+              <div class="eval-metric-box">
+                <span class="eval-label">MASE</span>
+                <strong id="eval-mase" class="eval-num">-</strong>
+                <span class="eval-sub">Mean Scaled Error</span>
+              </div>
+              <div class="eval-metric-box">
+                <span class="eval-label">Forecast Bias</span>
+                <strong id="eval-bias" class="eval-num">-</strong>
+                <span class="eval-sub">Under / Over prediction</span>
+              </div>
+              <div class="eval-metric-box">
+                <span class="eval-label">80% Interval Coverage</span>
+                <strong id="eval-coverage" class="eval-num">-</strong>
+                <span class="eval-sub">Nominal target: 80%</span>
+              </div>
+              <div class="eval-metric-box">
+                <span class="eval-label">Mean Interval Width</span>
+                <strong id="eval-width" class="eval-num">-</strong>
+                <span class="eval-sub">Q90 - Q10 Spread</span>
+              </div>
+            </div>
+            <p id="eval-note" class="about-note mt-12">Click "Evaluate on Historical Context" to test the selected model against the product's previous 28-day ground truth window.</p>
+          </div>
+        </details>
+
+        <details id="forecast-details" class="panel details-panel">
+          <summary class="details-summary">
+            <span>Forecast data</span>
+            <button id="download-csv-btn" type="button" class="btn-secondary" disabled>Download CSV</button>
+          </summary>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Date</th>
+                  <th scope="col" class="num">Median</th>
+                  <th scope="col" class="num">Expected</th>
+                  <th scope="col" class="num">Low (10th)</th>
+                  <th scope="col" class="num">High (90th)</th>
+                </tr>
+              </thead>
+              <tbody id="forecast-tbody">
+                <tr>
+                  <td colspan="5" class="muted-cell">Generate a forecast to view daily values.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+
+        <section class="panel about-panel" aria-label="About this forecast">
+          <h2 class="section-label">About this forecast</h2>
+          <dl class="about-grid">
+            <div>
+              <dt>Model</dt>
+              <dd id="about-model">Amazon Chronos-2 (amazon/chronos-2)</dd>
+            </div>
+            <div>
+              <dt>Method</dt>
+              <dd id="about-method">Pretrained, zero-shot, no fine-tuning</dd>
+            </div>
+            <div>
+              <dt>Device</dt>
+              <dd id="about-device">-</dd>
+            </div>
+            <div>
+              <dt>Input</dt>
+              <dd>Full daily sales history of the selected product-store</dd>
+            </div>
+          </dl>
+          <p class="about-note">Daily line shows median prediction (50th percentile); totals and daily average use expected demand approximated from 0.05-0.95 quantiles. Negative values are clipped to zero.</p>
+        </section>
+      </section>
+
+      <!-- ================= 2. OVERVIEW LANDING PAGE (MONOSPHERE UI) ================= -->
+      <section id="view-overview" class="view-panel">
+        <div class="mono-hero panel">
+          <div class="mono-badge-strip">
+            <span class="mono-tag live"><span class="dot"></span>SYS_ENGINE // ACTIVE</span>
+            <span class="mono-tag">ARCH // FOUNDATION + CUSTOM RECURSIVE</span>
+            <span class="mono-tag">STORAGE // VERSIONED PARQUET + SQLITE</span>
+          </div>
+          <h2 class="mono-title">Retail Demand Forecasting &amp; Model Intelligence Engine</h2>
+          <p class="mono-desc">Empirical comparative benchmarking platform evaluating zero-shot foundation models against custom recursive quantile models across retail sales time-series.</p>
+
+          <div class="mono-telemetry-grid">
+            <div class="mono-box">
+              <span class="mono-lbl">MONITORED_SERIES</span>
+              <strong id="ov-series" class="mono-val">75</strong>
+              <span class="mono-sub">Store-Product Combinations</span>
+            </div>
+            <div class="mono-box">
+              <span class="mono-lbl">TOTAL_OBSERVATIONS</span>
+              <strong id="ov-records" class="mono-val">143,475</strong>
+              <span class="mono-sub">Historical Daily Sales</span>
+            </div>
+            <div class="mono-box">
+              <span class="mono-lbl">ACTIVE_MODELS</span>
+              <strong class="mono-val">3 ENGINES</strong>
+              <span class="mono-sub">Chronos-2, Custom, Baseline</span>
+            </div>
+            <div class="mono-box">
+              <span class="mono-lbl">RUNTIME_DEVICE</span>
+              <strong id="ov-device" class="mono-val">CPU (INTEL/AMD)</strong>
+              <span class="mono-sub">Hardware Acceleration</span>
             </div>
           </div>
+        </div>
 
-          <div class="field">
-            <span id="horizon-label" class="section-label">Horizon (days)</span>
-            <div id="horizon-group" class="segmented" role="radiogroup" aria-labelledby="horizon-label">
-              <span id="horizon-highlight" class="segmented-highlight" aria-hidden="true"></span>
-              <button type="button" role="radio" aria-checked="false" data-horizon="7" tabindex="-1">7</button>
-              <button type="button" role="radio" aria-checked="false" data-horizon="14" tabindex="-1">14</button>
-              <button type="button" role="radio" aria-checked="true" data-horizon="28" tabindex="0">28</button>
-              <button type="button" role="radio" aria-checked="false" data-horizon="56" tabindex="-1">56</button>
-              <button type="button" role="radio" aria-checked="false" data-horizon="90" tabindex="-1">90</button>
-            </div>
+        <div class="mono-cards-row">
+          <div class="panel mono-card" data-jump="forecasting">
+            <span class="mono-card-num">01 / FORECAST</span>
+            <h3>Demand Forecasting</h3>
+            <p>Generate probabilistic forecasts with prediction intervals for any product &amp; store.</p>
+            <span class="mono-card-link">Launch Forecaster &rarr;</span>
           </div>
 
-          <div class="field field-action">
-            <button id="generate-btn" type="button" class="btn-primary" disabled>
-              <span id="btn-spinner" class="spinner" aria-hidden="true" hidden></span>
-              <span id="btn-label">Generate Forecast</span>
-            </button>
+          <div class="panel mono-card" data-jump="comparison">
+            <span class="mono-card-num">02 / COMPARE</span>
+            <h3>Model Comparison</h3>
+            <p>Side-by-side benchmark comparing Chronos-2, Custom Model, and Seasonal Baseline.</p>
+            <span class="mono-card-link">View Comparison &rarr;</span>
+          </div>
+
+          <div class="panel mono-card" data-jump="datasets">
+            <span class="mono-card-num">03 / DATASETS</span>
+            <h3>Data Management</h3>
+            <p>Import and validate retail CSV, XLSX, or Parquet datasets with automated quality checks.</p>
+            <span class="mono-card-link">Manage Datasets &rarr;</span>
+          </div>
+
+          <div class="panel mono-card" data-jump="history">
+            <span class="mono-card-num">04 / ARCHIVE</span>
+            <h3>Forecasting History</h3>
+            <p>Audit and inspect past forecasting runs, performance metrics, and stored curves.</p>
+            <span class="mono-card-link">Open Archive &rarr;</span>
+          </div>
+        </div>
+
+        <div class="panel mono-recent-panel">
+          <div class="chart-header">
+            <span class="section-label">Recent Forecast Activity Log</span>
+            <span class="mono-sub">Real-Time Audit Records</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Run ID</th>
+                  <th>Model Engine</th>
+                  <th>Series</th>
+                  <th class="num">Horizon</th>
+                  <th class="num">Execution Time</th>
+                  <th>Timestamp</th>
+                </tr>
+              </thead>
+              <tbody id="ov-recent-tbody">
+                <tr><td colspan="6" class="muted-cell">Loading experiment records...</td></tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </section>
 
-      <div class="status-bar" aria-live="polite">
-        <p id="data-summary" class="summary-line">Loading products...</p>
-        <p id="loading-text" class="loading-text" hidden>Running Chronos-2 inference...</p>
-        <p id="empty-hint" class="empty-hint">Select a product and click Generate Forecast</p>
-        <div id="error-banner" class="error-banner" role="alert" hidden></div>
-      </div>
+      <!-- ================= 3. MODEL COMPARISON VIEW ================= -->
+      <section id="view-comparison" class="view-panel">
+        <section class="panel controls-panel" aria-label="Comparison controls">
+          <div class="controls-grid">
+            <div class="field">
+              <label for="cmp-product-select" class="section-label">Product</label>
+              <div class="select-wrap">
+                <select id="cmp-product-select">
+                  <option value="">Loading products...</option>
+                </select>
+              </div>
+            </div>
 
-      <section class="kpi-row" aria-label="Forecast summary">
-        <div class="panel kpi-block">
-          <div id="kpi-total-label" class="section-label">Total predicted demand (28 days)</div>
-          <div class="kpi-value-row">
-            <span id="kpi-total-value" class="kpi-value">-</span>
-            <span id="kpi-total-unit" class="kpi-unit" hidden>units</span>
+            <div class="field">
+              <label for="cmp-store-select" class="section-label">Store</label>
+              <div class="select-wrap">
+                <select id="cmp-store-select">
+                  <option value="">Loading stores...</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="field">
+              <span class="section-label">Horizon (days)</span>
+              <div id="cmp-horizon-group" class="segmented">
+                <button type="button" data-horizon="7">7</button>
+                <button type="button" data-horizon="14">14</button>
+                <button type="button" data-horizon="28" class="active">28</button>
+                <button type="button" data-horizon="56">56</button>
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="cmp-mode-select" class="section-label">Evaluation Period</label>
+              <div class="select-wrap">
+                <select id="cmp-mode-select">
+                  <option value="historical">Historical Context (vs Ground Truth)</option>
+                  <option value="future">Future Forecast (Projection)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="field field-action">
+              <button id="cmp-run-btn" type="button" class="btn-primary">
+                <span id="cmp-spinner" class="spinner" hidden></span>
+                <span>Run Comparison</span>
+              </button>
+            </div>
           </div>
+        </section>
+
+        <div class="status-bar">
+          <p id="cmp-status-text" class="summary-line">Select product and store, then click Run Comparison</p>
         </div>
-        <div class="panel kpi-block">
-          <div class="section-label">Average daily predicted demand</div>
-          <div class="kpi-value-row">
-            <span id="kpi-avg-value" class="kpi-value">-</span>
-            <span id="kpi-avg-unit" class="kpi-unit" hidden>units/day</span>
+
+        <section class="panel chart-panel">
+          <div class="chart-header">
+            <span class="section-label">Multi-Model Demand Comparison Chart</span>
+            <div class="topbar-pills">
+              <span class="pill" style="color: #2563EB;">Chronos-2 (Zero-Shot)</span>
+              <span class="pill" style="color: #C2571A;">Custom Model</span>
+              <span class="pill" style="color: #6B7280;">Seasonal Baseline</span>
+            </div>
           </div>
+          <div id="cmp-chart" class="chart-container"></div>
+        </section>
+
+        <section class="panel">
+          <h3 class="section-label">Comparative Accuracy &amp; Performance Metrics</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Model Engine</th>
+                  <th class="num">MAE</th>
+                  <th class="num">RMSE</th>
+                  <th class="num">WAPE</th>
+                  <th class="num">MASE</th>
+                  <th class="num">Bias</th>
+                  <th class="num">Pinball Loss</th>
+                  <th class="num">80% Coverage</th>
+                  <th class="num">Mean Width</th>
+                  <th class="num">Time</th>
+                </tr>
+              </thead>
+              <tbody id="cmp-metrics-tbody">
+                <tr><td colspan="10" class="muted-cell">Click Run Comparison to generate multi-model metrics.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <!-- ================= 4. DATA MANAGEMENT VIEW ================= -->
+      <section id="view-datasets" class="view-panel">
+        <div class="panel controls-panel">
+          <h3 class="section-label">Import Dataset Wizard</h3>
+          <div class="file-drop-area" id="file-drop-zone">
+            <input type="file" id="file-input" accept=".csv,.xlsx,.xls,.parquet,.pq" class="file-input-hidden">
+            <div class="drop-prompt">
+              <span class="drop-icon">&#128193;</span>
+              <strong>Drag &amp; drop retail dataset file here</strong>
+              <span>or click to browse (CSV, Excel XLSX, Parquet)</span>
+            </div>
+          </div>
+          <div id="file-info-bar" class="file-info" hidden>
+            <span id="file-name-lbl">-</span>
+            <span id="file-size-lbl">-</span>
+          </div>
+
+          <form id="import-form" class="form-grid mt-16" hidden>
+            <div class="field full-width">
+              <label for="ds-name-input" class="section-label">Dataset Name</label>
+              <input type="text" id="ds-name-input" required placeholder="e.g. Supermarket Sales History">
+            </div>
+
+            <div class="field">
+              <label for="map-time-select" class="section-label">Date / Timestamp Column</label>
+              <div class="select-wrap">
+                <select id="map-time-select" required></select>
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="map-target-select" class="section-label">Target Demand / Sales Column</label>
+              <div class="select-wrap">
+                <select id="map-target-select" required></select>
+              </div>
+            </div>
+
+            <div class="field full-width">
+              <label for="map-series-input" class="section-label">Series Identifier Columns (Optional)</label>
+              <input type="text" id="map-series-input" placeholder="e.g. item_id, store_id (leave empty for single-series)">
+            </div>
+
+            <div class="field">
+              <label for="map-freq-select" class="section-label">Frequency</label>
+              <div class="select-wrap">
+                <select id="map-freq-select">
+                  <option value="D">Daily (D)</option>
+                  <option value="W">Weekly (W)</option>
+                  <option value="M">Monthly (M)</option>
+                  <option value="H">Hourly (H)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="map-covariates-input" class="section-label">Optional Covariates</label>
+              <input type="text" id="map-covariates-input" placeholder="e.g. is_promotion, price">
+            </div>
+
+            <div class="field full-width">
+              <button type="submit" id="wiz-submit-btn" class="btn-primary">
+                <span id="wiz-spinner" class="spinner" hidden></span>
+                <span>Validate &amp; Complete Import</span>
+              </button>
+            </div>
+          </form>
         </div>
-        <div class="panel kpi-block">
-          <div id="kpi-change-label" class="section-label">vs previous 28 days</div>
-          <div class="kpi-value-row">
-            <span id="kpi-change-value" class="kpi-value">-</span>
+
+        <section class="panel mt-20">
+          <h3 class="section-label">Imported Datasets Archive</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Dataset Name</th>
+                  <th>Version</th>
+                  <th class="num">Records</th>
+                  <th class="num">Series</th>
+                  <th>Date Coverage</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="ds-list-tbody">
+                <tr><td colspan="6" class="muted-cell">Loading datasets...</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div id="ds-quality-card" class="mt-16" hidden>
+            <h4 class="section-label">Data Quality Report</h4>
+            <div id="ds-quality-content" class="about-grid"></div>
+          </div>
+        </section>
+      </section>
+
+      <!-- ================= 5. FORECASTING HISTORY VIEW ================= -->
+      <section id="view-history" class="view-panel">
+        <section class="panel">
+          <div class="chart-header">
+            <h3 class="section-label">Historical Forecast Experiments Audit Log</h3>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Run ID</th>
+                  <th>Model Engine</th>
+                  <th>Model ID</th>
+                  <th>Series</th>
+                  <th class="num">Horizon</th>
+                  <th class="num">Execution Time</th>
+                  <th>Created At</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="hist-runs-tbody">
+                <tr><td colspan="8" class="muted-cell">Loading historical runs...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Modal Dialog for Inspecting Past Run -->
+        <div id="hist-modal" class="modal-backdrop" hidden>
+          <div class="modal-box panel">
+            <div class="modal-header">
+              <h3 id="modal-run-title" class="section-label">Forecast Run Inspection</h3>
+              <button type="button" id="modal-close-btn" class="btn-close">&times;</button>
+            </div>
+            <div class="modal-body">
+              <div id="modal-chart" class="chart-container-modal"></div>
+            </div>
           </div>
         </div>
       </section>
 
-      <section class="panel chart-panel" aria-label="Demand chart">
-        <div class="chart-header">
-          <div class="chart-strip" aria-label="Series dates and peak">
-            <div class="strip-item">
-              <span class="strip-label">Last actual day</span>
-              <span id="strip-last-actual" class="strip-val">-</span>
-            </div>
-            <div class="strip-item">
-              <span class="strip-label">Forecast period</span>
-              <span id="strip-period" class="strip-val">-</span>
-            </div>
-            <div class="strip-item">
-              <span class="strip-label">Peak forecast day</span>
-              <span id="strip-peak" class="strip-val">-</span>
-            </div>
-          </div>
-
-          <div id="range-group" class="range-buttons" role="group" aria-label="Chart zoom range">
-            <button type="button" class="range-btn" data-range="1M">1M</button>
-            <button type="button" class="range-btn" data-range="3M">3M</button>
-            <button type="button" class="range-btn" data-range="6M">6M</button>
-            <button type="button" class="range-btn" data-range="1Y">1Y</button>
-            <button type="button" class="range-btn" data-range="ALL" aria-pressed="true">All</button>
-          </div>
-        </div>
-
-        <div class="chart-stage">
-          <div id="chart-skeleton" class="chart-skeleton" hidden aria-hidden="true"></div>
-          <div id="chart" class="chart-container"></div>
-        </div>
-      </section>
-
-      <details id="forecast-details" class="panel details-panel">
-        <summary class="details-summary">
-          <span>Forecast data</span>
-          <button id="download-csv-btn" type="button" class="btn-secondary" disabled>Download CSV</button>
-        </summary>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">Date</th>
-                <th scope="col" class="num">Median</th>
-                <th scope="col" class="num">Expected</th>
-                <th scope="col" class="num">Low (10th)</th>
-                <th scope="col" class="num">High (90th)</th>
-              </tr>
-            </thead>
-            <tbody id="forecast-tbody">
-              <tr>
-                <td colspan="5" class="muted-cell">Generate a forecast to view daily values.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </details>
-
-      <section class="panel about-panel" aria-label="About this forecast">
-        <h2 class="section-label">About this forecast</h2>
-        <dl class="about-grid">
-          <div>
-            <dt>Model</dt>
-            <dd id="about-model">Amazon Chronos-2 (amazon/chronos-2)</dd>
-          </div>
-          <div>
-            <dt>Method</dt>
-            <dd>Pretrained, zero-shot, no fine-tuning</dd>
-          </div>
-          <div>
-            <dt>Device</dt>
-            <dd id="about-device">-</dd>
-          </div>
-          <div>
-            <dt>Input</dt>
-            <dd>Full daily sales history of the selected product-store</dd>
-          </div>
-        </dl>
-        <p class="about-note">Daily line shows the Chronos-2 median (50th percentile); totals and daily average use expected demand approximated from 0.05-0.95 quantiles. Negative values are clipped to zero.</p>
-      </section>
     </main>
   </div>
 </body>
