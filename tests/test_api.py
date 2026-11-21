@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 import math
+import time
 
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
 from rdf.config import DATA_DIR, MODEL_ID
-from server.main import app
 
 RAW = DATA_DIR / "demand_history.csv"
 
@@ -16,12 +16,6 @@ RAW = DATA_DIR / "demand_history.csv"
 @pytest.fixture(scope="session")
 def raw_df() -> pd.DataFrame:
     return pd.read_csv(RAW, parse_dates=["date"])
-
-
-@pytest.fixture(scope="session")
-def client():
-    with TestClient(app) as c:
-        yield c
 
 
 def test_get_series_matches_raw_csv(client: TestClient, raw_df: pd.DataFrame):
@@ -70,11 +64,13 @@ def test_forecast_validation_and_unknown_series(client: TestClient):
 
 @pytest.mark.slow
 def test_post_forecast_real_chronos2(client: TestClient, raw_df: pd.DataFrame):
+    t0 = time.perf_counter()
     sid = "FOODS_3_080 | Texas - TX_1"
     mat, area = sid.split(" | ")
     last_history_date = raw_df[(raw_df.material == mat) & (raw_df.area == area)]["date"].max()
 
     resp = client.post("/api/forecast", json={"series_id": sid, "horizon": 28})
+    print(f"[slow] Stage Forecast API (Chronos-2 28d) took {time.perf_counter() - t0:.2f}s")
     assert resp.status_code == 200
     data = resp.json()
 

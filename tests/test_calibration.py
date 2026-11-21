@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -11,7 +13,6 @@ from rdf.calibration import (
     fit_interval_scale,
     get_series_calibration,
 )
-from server.main import app
 
 
 def test_fit_interval_scale_reaches_target_coverage():
@@ -74,32 +75,33 @@ def test_calibration_excludes_test_window(tmp_path, monkeypatch):
 
 
 @pytest.mark.slow
-def test_chronos_calibration_and_api_exposure():
-    with TestClient(app) as client:
-        series_res = client.get("/api/series")
-        assert series_res.status_code == 200
-        payload = series_res.json()
-        series_list = payload if isinstance(payload, list) else payload.get("series", [])
-        assert len(series_list) > 0
-        series_id = series_list[0] if isinstance(series_list[0], str) else series_list[0]["series_id"]
+def test_chronos_calibration_and_api_exposure(client: TestClient):
+    t0 = time.perf_counter()
+    series_res = client.get("/api/series")
+    assert series_res.status_code == 200
+    payload = series_res.json()
+    series_list = payload if isinstance(payload, list) else payload.get("series", [])
+    assert len(series_list) > 0
+    series_id = series_list[0] if isinstance(series_list[0], str) else series_list[0]["series_id"]
 
-        cal_res = client.post(
-            "/api/calibration/run",
-            json={"series_id": series_id, "model_type": "chronos", "horizon": 28},
-        )
-        assert cal_res.status_code == 200
-        cal = cal_res.json()
-        assert cal["calibrated"] is True
-        assert cal["scale_k"] > 0
-        assert 0.0 <= cal["raw_coverage_80"] <= 1.0
-        assert 0.0 <= cal["calibrated_coverage_80"] <= 1.0
+    cal_res = client.post(
+        "/api/calibration/run",
+        json={"series_id": series_id, "model_type": "chronos", "horizon": 28},
+    )
+    assert cal_res.status_code == 200
+    cal = cal_res.json()
+    assert cal["calibrated"] is True
+    assert cal["scale_k"] > 0
+    assert 0.0 <= cal["raw_coverage_80"] <= 1.0
+    assert 0.0 <= cal["calibrated_coverage_80"] <= 1.0
 
-        fc_res = client.post(
-            "/api/forecast",
-            json={"series_id": series_id, "horizon": 28, "model_type": "chronos"},
-        )
-        assert fc_res.status_code == 200
-        fc = fc_res.json()
-        assert "expected" in fc and len(fc["expected"]) == 28
-        assert "q10" in fc and "q90" in fc
-        assert fc["calibration"]["calibrated"] is True
+    fc_res = client.post(
+        "/api/forecast",
+        json={"series_id": series_id, "horizon": 28, "model_type": "chronos"},
+    )
+    assert fc_res.status_code == 200
+    fc = fc_res.json()
+    assert "expected" in fc and len(fc["expected"]) == 28
+    assert "q10" in fc and "q90" in fc
+    assert fc["calibration"]["calibrated"] is True
+    print(f"[slow] Stage 0 Calibration & Forecast API (Chronos-2) took {time.perf_counter() - t0:.2f}s")

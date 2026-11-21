@@ -12,12 +12,6 @@ from rdf.config import DATA_DIR, PROCESSED_DIR
 from server.main import app
 
 
-@pytest.fixture(scope="session")
-def client():
-    with TestClient(app) as c:
-        yield c
-
-
 def test_health_endpoint_matches_overview(client: TestClient):
     h_resp = client.get("/api/health")
     o_resp = client.get("/api/overview")

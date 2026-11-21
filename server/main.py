@@ -29,13 +29,29 @@ import numpy as np
 import pandas as pd
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from rdf import config
+from rdf.automation import create_schedule, delete_schedule, execute_schedule, list_schedules
 from rdf.baseline import forecast_seasonal_naive
+from rdf.reporting import export_inventory_excel, export_inventory_pdf
+from rdf.calendar_events import (
+    create_promotion,
+    delete_promotion,
+    get_events_for_window,
+    list_promotions,
+)
 from rdf.calibration import calibrate_series_validation, get_series_calibration
+from rdf.inventory import (
+    compute_reorder_metrics,
+    get_batch_job_status,
+    get_inventory_dashboard,
+    run_what_if_scenario,
+    save_inventory_override,
+    start_batch_forecast_job,
+)
 from rdf.data_loader import get_series as get_series_legacy, list_series as list_series_legacy, load_sales, series_summary
 from rdf.dataset_manager import (
     delete_dataset,
@@ -76,6 +92,7 @@ class ForecastRequest(BaseModel):
     model_type: str = Field(default="chronos")
     model_id: Optional[str] = None
     dataset_id: Optional[str] = None
+    use_calendar_covariates: bool = False
 
 
 class CalibrationRequest(BaseModel):
@@ -236,6 +253,7 @@ def api_forecast(req: ForecastRequest) -> dict[str, Any]:
             series_id=req.series_id,
             dataset_id=dataset_id,
             chronos_pipeline_tuple=chronos_tuple,
+            use_calendar_covariates=req.use_calendar_covariates,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -766,6 +784,265 @@ def api_overview() -> dict[str, Any]:
         "device_label": health["device_label"],
         "device": health["device_label"],
     }
+
+
+# --- Stage 1: Inventory & Reorder Endpoints ---
+
+class InventoryOverrideRequest(BaseModel):
+    series_id: str
+    dataset_id: str = "retail-demand-m5"
+    on_hand: Optional[float] = None
+    in_transit: float = 0.0
+    review_period: float = 7.0
+    pack_size: int = 1
+    moq: int = 0
+    service_level: float = 0.95
+    excess_days_threshold: float = 60.0
+
+
+class InventoryCalculateRequest(BaseModel):
+    on_hand: float = 0.0
+    in_transit: float = 0.0
+    daily_demand_mean: float = 10.0
+    daily_demand_std: float = 3.0
+    lead_time_mean: float = 4.0
+    lead_time_std: float = 1.0
+    review_period: float = 7.0
+    service_level: float = 0.95
+    pack_size: int = 1
+    moq: int = 0
+    excess_days_threshold: float = 60.0
+    sigma_D_override: Optional[float] = None
+    horizon: int = 28
+
+
+class InventoryRefreshRequest(BaseModel):
+    dataset_id: str = "retail-demand-m5"
+    horizon: int = 28
+
+
+@app.get("/api/inventory")
+def api_get_inventory(
+    dataset_id: Optional[str] = Query(None),
+    model_type: str = Query("chronos"),
+) -> dict[str, Any]:
+    ds_id = dataset_id or app.state.default_dataset_id or "retail-demand-m5"
+    return get_inventory_dashboard(dataset_id=ds_id, model_type=model_type)
+
+
+@app.post("/api/inventory/override")
+def api_save_inventory_override(req: InventoryOverrideRequest) -> dict[str, Any]:
+    return save_inventory_override(
+        series_id=req.series_id,
+        dataset_id=req.dataset_id,
+        on_hand=req.on_hand,
+        in_transit=req.in_transit,
+        review_period=req.review_period,
+        pack_size=req.pack_size,
+        moq=req.moq,
+        service_level=req.service_level,
+        excess_days_threshold=req.excess_days_threshold,
+    )
+
+
+@app.post("/api/inventory/calculate")
+def api_calculate_manual_inventory(req: InventoryCalculateRequest) -> dict[str, Any]:
+    import math
+    h = max(int(math.ceil(req.lead_time_mean + req.review_period)) + 2, req.horizon)
+    daily_exp = [max(0.0, float(req.daily_demand_mean))] * h
+    daily_q90 = [max(0.0, float(req.daily_demand_mean) + 1.2816 * float(req.daily_demand_std))] * h
+    sigma_D = (
+        float(req.sigma_D_override)
+        if req.sigma_D_override is not None
+        else float(req.daily_demand_std) * math.sqrt(max(0.0, float(req.lead_time_mean)))
+    )
+    return compute_reorder_metrics(
+        on_hand=req.on_hand,
+        in_transit=req.in_transit,
+        daily_expected=daily_exp,
+        daily_q90=daily_q90,
+        L_mean=req.lead_time_mean,
+        L_std=req.lead_time_std,
+        sigma_D=sigma_D,
+        review_period=req.review_period,
+        service_level=req.service_level,
+        pack_size=req.pack_size,
+        moq=req.moq,
+        excess_days_threshold=req.excess_days_threshold,
+    )
+
+
+@app.post("/api/inventory/refresh-forecasts")
+def api_refresh_inventory_forecasts(req: InventoryRefreshRequest) -> dict[str, Any]:
+    return start_batch_forecast_job(dataset_id=req.dataset_id, horizon=req.horizon)
+
+
+@app.get("/api/inventory/refresh-status/{job_id}")
+def api_get_inventory_refresh_status(job_id: str) -> dict[str, Any]:
+    status = get_batch_job_status(job_id)
+    if not status:
+        raise HTTPException(status_code=404, detail=f"Batch job '{job_id}' not found")
+    return status
+
+
+class WhatIfRequest(BaseModel):
+    series_id: str = Field(..., min_length=1)
+    dataset_id: str = "retail-demand-m5"
+    model_type: str = "chronos"
+    demand_multiplier: float = Field(default=1.0, ge=0.0, le=5.0)
+    lead_time_delta_days: float = Field(default=0.0, ge=-10.0, le=60.0)
+    service_level: float = Field(default=0.95, ge=0.50, le=0.999)
+    review_period: float = Field(default=7.0, ge=1.0, le=90.0)
+    on_hand_override: Optional[float] = None
+    in_transit_override: Optional[float] = None
+    pack_size: int = Field(default=1, ge=1)
+    moq: int = Field(default=0, ge=0)
+    excess_days_threshold: float = Field(default=60.0, ge=1.0)
+
+
+@app.post("/api/inventory/what-if")
+def api_inventory_what_if(req: WhatIfRequest) -> dict[str, Any]:
+    try:
+        return run_what_if_scenario(
+            series_id=req.series_id,
+            dataset_id=req.dataset_id,
+            model_type=req.model_type,
+            demand_multiplier=req.demand_multiplier,
+            lead_time_delta_days=req.lead_time_delta_days,
+            service_level=req.service_level,
+            review_period=req.review_period,
+            on_hand_override=req.on_hand_override,
+            in_transit_override=req.in_transit_override,
+            pack_size=req.pack_size,
+            moq=req.moq,
+            excess_days_threshold=req.excess_days_threshold,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+# --- Stage 2: Calendar Events & Promotions Endpoints ---
+
+class PromotionRequest(BaseModel):
+    name: str = Field(..., min_length=1)
+    start_date: str = Field(..., min_length=8)
+    end_date: str = Field(..., min_length=8)
+    series_id: Optional[str] = None
+    dataset_id: str = "retail-demand-m5"
+    promo_type: str = "promotion"
+    uplift_pct: float = Field(default=0.0, ge=-90.0, le=500.0)
+    notes: str = ""
+
+
+@app.get("/api/calendar/events")
+def api_get_calendar_events(
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    series_id: Optional[str] = Query(None),
+    dataset_id: str = Query("retail-demand-m5"),
+) -> dict[str, Any]:
+    return get_events_for_window(
+        start_date=start_date,
+        end_date=end_date,
+        series_id=series_id,
+        dataset_id=dataset_id,
+    )
+
+
+@app.get("/api/promotions")
+def api_list_promotions(dataset_id: str = Query("retail-demand-m5")) -> list[dict[str, Any]]:
+    return list_promotions(dataset_id=dataset_id)
+
+
+@app.post("/api/promotions")
+def api_create_promotion(req: PromotionRequest) -> dict[str, Any]:
+    try:
+        return create_promotion(
+            name=req.name,
+            start_date=req.start_date,
+            end_date=req.end_date,
+            series_id=req.series_id,
+            dataset_id=req.dataset_id,
+            promo_type=req.promo_type,
+            uplift_pct=req.uplift_pct,
+            notes=req.notes,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.delete("/api/promotions/{promo_id}")
+def api_delete_promotion(promo_id: str) -> dict[str, Any]:
+    if not delete_promotion(promo_id):
+        raise HTTPException(status_code=404, detail=f"Promotion '{promo_id}' not found")
+    return {"deleted": True, "id": promo_id}
+
+
+# --- Stage 4: Reporting & Automation Endpoints ---
+
+@app.get("/api/reports/inventory.xlsx")
+def api_export_inventory_excel(dataset_id: str = Query("retail-demand-m5")) -> Response:
+    data = export_inventory_excel(dataset_id=dataset_id)
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="inventory_reorder_report.xlsx"'},
+    )
+
+
+@app.get("/api/reports/inventory.pdf")
+def api_export_inventory_pdf(dataset_id: str = Query("retail-demand-m5")) -> Response:
+    try:
+        data = export_inventory_pdf(dataset_id=dataset_id)
+    except RuntimeError as e:
+        raise HTTPException(status_code=501, detail=str(e)) from e
+    return Response(
+        content=data,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="inventory_reorder_report.pdf"'},
+    )
+
+
+class ScheduleRequest(BaseModel):
+    name: str = Field(..., min_length=1)
+    job_type: str = Field(default="batch_forecast_refresh")
+    cron_expr: str = Field(default="0 6 * * *")
+    dataset_id: str = "retail-demand-m5"
+
+
+@app.get("/api/automation/schedules")
+def api_list_schedules() -> dict[str, Any]:
+    return list_schedules()
+
+
+@app.post("/api/automation/schedules")
+def api_create_schedule(req: ScheduleRequest) -> dict[str, Any]:
+    try:
+        return create_schedule(
+            name=req.name,
+            job_type=req.job_type,
+            cron_expr=req.cron_expr,
+            dataset_id=req.dataset_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/api/automation/schedules/{schedule_id}/run")
+def api_run_schedule_now(schedule_id: str) -> dict[str, Any]:
+    try:
+        return execute_schedule(schedule_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.delete("/api/automation/schedules/{schedule_id}")
+def api_delete_schedule(schedule_id: str) -> dict[str, Any]:
+    if not delete_schedule(schedule_id):
+        raise HTTPException(status_code=404, detail=f"Schedule '{schedule_id}' not found")
+    return {"deleted": True, "id": schedule_id}
 
 
 WEB_DIR.mkdir(exist_ok=True)

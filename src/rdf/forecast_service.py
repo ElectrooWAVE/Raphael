@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 
 from .baseline import forecast_seasonal_naive
+from .calendar_events import build_known_future_covariates, get_events_for_window
 from .calibration import apply_interval_calibration, get_series_calibration
 from .config import CONTEXT_LENGTH, DATA_DIR, MODEL_ID
 from .data_loader import get_series as get_series_legacy
@@ -134,6 +135,7 @@ def generate_single_forecast(
     chronos_pipeline_tuple: tuple[Any, str] | None = None,
     dataset_id: str = "default",
     version_id: str = "v1",
+    use_calendar_covariates: bool = False,
 ) -> dict[str, Any]:
     """Execute forecast using selected model engine and persist execution run."""
     init_db()
@@ -148,12 +150,34 @@ def generate_single_forecast(
     device = "cpu"
     used_model_id = model_id or ("Custom Model" if is_custom_alias else model_type_clean)
 
+    forecast_dates = pd.date_range(
+        pd.Timestamp(history_df["date"].max()) + pd.Timedelta(days=1),
+        periods=horizon,
+        freq="D",
+    )
+    hist_cov, fut_cov, promo_uplifts = build_known_future_covariates(
+        history_df["date"],
+        forecast_dates,
+        series_id=series_id,
+        dataset_id=dataset_id,
+    )
+
     if model_type_clean == "chronos":
         if chronos_pipeline_tuple is None:
             pipeline, device = load_pipeline()
         else:
             pipeline, device = chronos_pipeline_tuple
-        res_df = forecast_chronos(pipeline, history_df, horizon, series_id)
+        if use_calendar_covariates:
+            res_df = forecast_chronos(
+                pipeline,
+                history_df,
+                horizon,
+                series_id,
+                history_covariates=hist_cov,
+                future_covariates=fut_cov,
+            )
+        else:
+            res_df = forecast_chronos(pipeline, history_df, horizon, series_id)
         used_model_id = MODEL_ID
 
     elif model_type_clean == "lightgbm":
@@ -227,6 +251,29 @@ def generate_single_forecast(
     total_pred = float(np.sum(expected_vals))
     daily_avg = float(np.mean(expected_vals))
 
+    events_in_horizon = (
+        get_events_for_window(dates[0], dates[-1], series_id=series_id, dataset_id=dataset_id)
+        if dates
+        else {"calendar_events": [], "promotions": []}
+    )
+    promo_adjusted = None
+    if promo_uplifts:
+        adj_exp = [
+            round(v * max(0.0, 1.0 + promo_uplifts.get(dt, 0.0) / 100.0), 4)
+            for dt, v in zip(dates, expected_vals)
+        ]
+        adj_med = [
+            round(v * max(0.0, 1.0 + promo_uplifts.get(dt, 0.0) / 100.0), 4)
+            for dt, v in zip(dates, median_vals)
+        ]
+        promo_adjusted = {
+            "source": "user_assumption",
+            "uplifts_by_date": promo_uplifts,
+            "adjusted_expected": adj_exp,
+            "adjusted_median": adj_med,
+            "adjusted_total": float(np.sum(adj_exp)),
+        }
+
     # Persist into database
     hist_end = str(history_df["date"].max()) if "date" in history_df else ""
     fc_start = dates[0] if dates else ""
@@ -292,6 +339,9 @@ def generate_single_forecast(
         "device": device,
         "model": used_model_id,
         "model_type": "custom" if is_custom_alias else model_type_clean,
+        "use_calendar_covariates": use_calendar_covariates,
+        "events_in_horizon": events_in_horizon,
+        "promo_adjusted": promo_adjusted,
         "execution_time_sec": round(exec_duration, 3),
     }
 

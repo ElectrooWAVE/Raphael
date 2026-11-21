@@ -6,6 +6,8 @@ are drawn from `history_df.iloc[:-horizon]`. Reuses `compute_metrics` and
 """
 from __future__ import annotations
 
+import json
+import math
 from typing import Any, Sequence
 
 import numpy as np
@@ -138,6 +140,7 @@ def calibrate_series_validation(
     all_exp: list[float] = []
     all_q10: list[float] = []
     all_q90: list[float] = []
+    cutoff_errors: list[list[float]] = []
 
     for c_idx in cutoffs:
         ctx = val_df.iloc[:c_idx]
@@ -152,12 +155,16 @@ def calibrate_series_validation(
         else:
             fc = forecast_seasonal_naive(ctx, horizon, frequency="D")
 
-        all_act.extend(float(v) for v in target_slice["sales"].to_numpy())
-        all_med.extend(float(v) for v in fc["median"].to_numpy())
+        act_vals = [float(v) for v in target_slice["sales"].to_numpy()]
         exp_col = fc["expected"] if "expected" in fc.columns else fc["median"]
-        all_exp.extend(float(v) for v in exp_col.to_numpy())
+        exp_vals = [float(v) for v in exp_col.to_numpy()]
+
+        all_act.extend(act_vals)
+        all_med.extend(float(v) for v in fc["median"].to_numpy())
+        all_exp.extend(exp_vals)
         all_q10.extend(float(v) for v in fc["q10"].to_numpy())
         all_q90.extend(float(v) for v in fc["q90"].to_numpy())
+        cutoff_errors.append([a - e for a, e in zip(act_vals, exp_vals)])
 
     metrics = compute_metrics(
         actual=all_act,
@@ -180,6 +187,7 @@ def calibrate_series_validation(
     sigma_d = round(float(np.std(y_arr - exp_arr, ddof=1)) if len(y_arr) > 1 else 0.0, 4)
     val_end = pd.Timestamp(val_df["date"].iloc[-1]).strftime("%Y-%m-%d")
     updated = now_iso()
+    val_errors_json = json.dumps(cutoff_errors)
 
     with get_db() as conn:
         conn.execute(
@@ -187,8 +195,8 @@ def calibrate_series_validation(
             INSERT OR REPLACE INTO series_calibration (
                 series_id, model_type, dataset_id, horizon, scale_k,
                 raw_coverage_80, calibrated_coverage_80, sigma_d,
-                mae, wape, bias, sample_points, val_window_end, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                mae, wape, bias, sample_points, val_window_end, val_errors_json, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 series_id,
@@ -204,6 +212,7 @@ def calibrate_series_validation(
                 metrics.get("bias"),
                 len(all_act),
                 val_end,
+                val_errors_json,
                 updated,
             ),
         )
@@ -223,5 +232,47 @@ def calibrate_series_validation(
         "bias": metrics.get("bias"),
         "sample_points": len(all_act),
         "val_window_end": val_end,
+        "val_errors_json": val_errors_json,
         "updated_at": updated,
     }
+
+
+def compute_lead_time_error_std(
+    calibration: dict[str, Any] | None,
+    lead_time_days: float,
+) -> tuple[float, str]:
+    """Compute sigma_D over a lead-time window from Stage 0 validation backtest errors.
+
+    Sums contiguous daily errors over windows of continuous length `lead_time_days`
+    across validation cutoffs. Falls back to `sigma_d * sqrt(L)` only if validation
+    error arrays are unavailable or shorter than `lead_time_days`.
+    """
+    L = max(0.0, float(lead_time_days))
+    if L == 0.0 or not calibration:
+        return 0.0, "none"
+
+    raw_json = calibration.get("val_errors_json")
+    if raw_json:
+        try:
+            cutoffs = json.loads(raw_json) if isinstance(raw_json, str) else raw_json
+        except Exception:
+            cutoffs = []
+        full_days = int(math.floor(L))
+        frac = L - full_days
+        need_len = full_days + (1 if frac > 1e-9 else 0)
+        window_sums: list[float] = []
+        for errs in cutoffs or []:
+            if not isinstance(errs, list) or len(errs) < need_len:
+                continue
+            for start in range(0, len(errs) - need_len + 1):
+                total = sum(float(errs[start + j]) for j in range(full_days))
+                if frac > 1e-9:
+                    total += frac * float(errs[start + full_days])
+                window_sums.append(total)
+        if len(window_sums) >= 2:
+            return float(np.std(np.asarray(window_sums, dtype=float), ddof=1)), "validation_windows"
+
+    sigma_d = calibration.get("sigma_d")
+    if sigma_d is not None:
+        return float(sigma_d) * math.sqrt(L), "sigma_d_sqrt_L"
+    return 0.0, "none"

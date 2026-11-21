@@ -10,16 +10,18 @@ Web dashboard and FastAPI backend for retail demand forecasting using the offici
 - **Data & Export:** Collapsible `Forecast data` table (`Date`, `Median`, `Expected`, `Low (10th)`, `High (90th)`) with client-side **Download CSV**.
 - **Forecasting History & Run Inspector:** Filter runs by series or engine (`Chronos-2`, `Custom (LightGBM)`, `Baseline`), sort newest/oldest, paginate, delete runs with confirmation, and click **Inspect** to view run metadata, reproducibility info (package versions, dataset SHA-256, parameters), stored forecast chart + table, CSV download, and **Re-run with same settings** (creates a new run).
 - **80% Interval Calibration (Validation-Only):** Computes per-series validation backtest error statistics (`sigma_d`, MAE, WAPE, Bias, raw vs calibrated 80% coverage) and scales `[q10, q90]` around the median so empirical 80% interval coverage targets ~80% without ever touching the test window.
+- **Inventory & Reorder (Stage 1 — Simulated Demo Data):** Combines stored 28-day Chronos-2 forecasts, Stage 0 validation lead-time error windows (`sigma_D`), `data/current_inventory.csv`, and `data/lead_time_history.csv` to compute Safety Stock, ROP, Order-up-to `S`, pack/MOQ-rounded Order Qty, Stockout ETA, and `CRITICAL / LOW / EXCESS / HEALTHY` statuses (plus a Manual Reorder Calculator for any dataset).
 
 ## Windows Setup & Run Commands
 ```powershell
 cd E:\projects\Raphael
 .venv\Scripts\python.exe -m pytest -q
-.venv\Scripts\python.exe -m pytest tests/test_calibration.py -v -s
-.venv\Scripts\python.exe -m pytest tests/test_history_api.py -q
+.venv\Scripts\python.exe -m pytest -m slow -v -s
 .venv\Scripts\python.exe scripts/smoke_test.py
 .venv\Scripts\python.exe -m uvicorn server.main:app
 ```
+- `pytest -q` runs the fast suite (skips `@pytest.mark.slow` via `pytest.ini` `addopts = -m "not slow"`).
+- `pytest -m slow -v -s` runs real Chronos-2 inference tests with stage/elapsed progress output.
 Open **`http://127.0.0.1:8000`** for the web dashboard (or **`http://127.0.0.1:8000/docs`** for the FastAPI Swagger UI).
 
 ## Layout

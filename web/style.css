@@ -1403,3 +1403,172 @@ td.num {
     transition-duration: 0.001ms !important;
   }
 }
+
+/* --- Stage 1: Inventory & Reorder --- */
+.inv-header-top {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--sp-3);
+}
+
+.inv-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.pill-demo {
+  background: rgba(194, 87, 26, 0.12);
+  color: #9A3F0E;
+  font-weight: 600;
+}
+
+.inv-progress-wrap {
+  margin-top: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.inv-progress-bar {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--bg);
+  box-shadow: var(--neu-pressed);
+  overflow: hidden;
+}
+
+.inv-progress-fill {
+  height: 100%;
+  background: var(--primary);
+  transition: width 0.2s ease;
+}
+
+.inv-progress-label {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.inv-rules-box {
+  margin-top: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: 10px;
+  background: var(--plot-bg);
+  font-size: 12.5px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  color: var(--text);
+}
+
+.inv-summary-grid {
+  margin-top: var(--sp-3);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--sp-3);
+}
+
+.inv-kpi {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--neu-raised-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.inv-kpi-lbl {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.inv-kpi strong {
+  font-size: 20px;
+}
+
+.inv-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.inv-badge-critical { background: rgba(180, 35, 24, 0.14); color: #911B12; }
+.inv-badge-low { background: rgba(194, 87, 26, 0.14); color: #9A3F0E; }
+.inv-badge-healthy { background: rgba(20, 110, 65, 0.14); color: #0F5B35; }
+.inv-badge-excess { background: rgba(31, 78, 121, 0.14); color: #1F4E79; }
+.inv-badge-needs_forecast { background: rgba(89, 102, 115, 0.15); color: #3D4752; }
+.inv-badge-warn { background: rgba(194, 87, 26, 0.12); color: #9A3F0E; font-size: 10.5px; margin-top: 2px; }
+
+.inv-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+
+.field-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.inv-table-wrap {
+  max-height: 540px;
+  overflow: auto;
+}
+
+.inv-input-sm {
+  width: 68px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  text-align: right;
+}
+
+.inv-calc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--sp-3);
+  margin-top: var(--sp-2);
+}
+
+.inv-calc-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.inv-calc-grid input {
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+
+.inv-calc-result {
+  margin-top: var(--sp-3);
+  padding: var(--sp-3);
+  border-radius: 10px;
+  background: var(--plot-bg);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  font-size: 14px;
+}

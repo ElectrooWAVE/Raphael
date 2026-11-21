@@ -10,10 +10,14 @@ const state = {
   horizon: 28,
   rangeKey: "1Y",
   showMa7: false,
+  useCalendarCovariates: false,
+  calendarEvents: [],
+  promotions: [],
   health: null,
   history: null,
   forecast: null,
   calibration: null,
+  inventoryData: null,
   evalMetrics: null,
   lastComparison: null,
   cmpIntervalEngines: new Set(),
@@ -123,12 +127,67 @@ const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ series_id: seriesId, model_type: modelType, horizon }),
     }),
-  postForecast: (seriesId, horizon, modelType) =>
+  postForecast: (seriesId, horizon, modelType, useCalendarCovariates = false) =>
     apiFetch("/api/forecast", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ series_id: seriesId, horizon, model_type: modelType }),
+      body: JSON.stringify({
+        series_id: seriesId,
+        horizon,
+        model_type: modelType,
+        use_calendar_covariates: useCalendarCovariates,
+      }),
     }),
+  getCalendarEvents: (seriesId) =>
+    apiFetch(seriesId ? `/api/calendar/events?series_id=${encodeURIComponent(seriesId)}` : "/api/calendar/events"),
+  getPromotions: () => apiFetch("/api/promotions"),
+  createPromotion: (payload) =>
+    apiFetch("/api/promotions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  deletePromotion: (promoId) =>
+    apiFetch(`/api/promotions/${encodeURIComponent(promoId)}`, { method: "DELETE" }),
+  getInventory: (datasetId) =>
+    apiFetch(datasetId ? `/api/inventory?dataset_id=${encodeURIComponent(datasetId)}` : "/api/inventory"),
+  saveInventoryOverride: (payload) =>
+    apiFetch("/api/inventory/override", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  calculateManualInventory: (payload) =>
+    apiFetch("/api/inventory/calculate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  runWhatIf: (payload) =>
+    apiFetch("/api/inventory/what-if", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  getAutomationSchedules: () => apiFetch("/api/automation/schedules"),
+  createAutomationSchedule: (payload) =>
+    apiFetch("/api/automation/schedules", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  runAutomationSchedule: (scheduleId) =>
+    apiFetch(`/api/automation/schedules/${encodeURIComponent(scheduleId)}/run`, { method: "POST" }),
+  deleteAutomationSchedule: (scheduleId) =>
+    apiFetch(`/api/automation/schedules/${encodeURIComponent(scheduleId)}`, { method: "DELETE" }),
+  refreshInventoryForecasts: (datasetId = "retail-demand-m5", horizon = 28) =>
+    apiFetch("/api/inventory/refresh-forecasts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dataset_id: datasetId, horizon }),
+    }),
+  getInventoryRefreshStatus: (jobId) =>
+    apiFetch(`/api/inventory/refresh-status/${encodeURIComponent(jobId)}`),
   postCompare: (seriesId, horizon, cutoffIndex) =>
     apiFetch("/api/compare", {
       method: "POST",
@@ -306,6 +365,8 @@ function switchTab(tabId) {
     }, 50);
   } else if (tabId === "overview") {
     loadOverview();
+  } else if (tabId === "inventory") {
+    loadInventoryView();
   } else if (tabId === "training") {
     loadTrainingView();
   } else if (tabId === "comparison") {
@@ -572,9 +633,73 @@ function renderChart(animateReveal = false) {
         hovertemplate: `${modelName} (median): %{y:,.1f} units<extra></extra>`,
       }
     );
+
+    if (f.promo_adjusted && Array.isArray(f.promo_adjusted.adjusted_median)) {
+      traces.push({
+        x: f.dates,
+        y: f.promo_adjusted.adjusted_median,
+        type: "scatter",
+        mode: "lines",
+        name: "Promo-adjusted (user assumption)",
+        line: { color: "#7C3AED", width: 2, dash: "dash" },
+        hovertemplate: "Promo-adjusted: %{y:,.1f} units<extra></extra>",
+      });
+    }
   }
 
   const layout = buildChartLayout(hasForecast);
+  const shapes = [];
+  const annotations = [];
+  const minDate = hDates[0];
+  const maxDate = hasForecast ? state.forecast.dates[state.forecast.dates.length - 1] : hDates[hDates.length - 1];
+
+  // Overlay reference calendar events in forecast horizon (and recent tail)
+  const calEvents = (hasForecast && state.forecast.events_in_horizon?.calendar_events) || [];
+  calEvents.slice(0, 12).forEach((ev) => {
+    if (ev.date >= minDate && ev.date <= maxDate) {
+      shapes.push({
+        type: "line",
+        x0: ev.date,
+        x1: ev.date,
+        y0: 0,
+        y1: 1,
+        yref: "paper",
+        line: { color: "rgba(15, 118, 110, 0.55)", width: 1.2, dash: "dot" },
+      });
+      annotations.push({
+        x: ev.date,
+        y: 0.98,
+        yref: "paper",
+        text: ev.event_name_1,
+        showarrow: false,
+        textangle: -35,
+        font: { size: 10, color: "#0F766E" },
+        xanchor: "left",
+      });
+    }
+  });
+
+  // Overlay promotion windows
+  (state.promotions || []).forEach((p) => {
+    const sid = currentSeriesId();
+    if (p.series_id && p.series_id !== sid) return;
+    if (p.end_date >= minDate && p.start_date <= maxDate) {
+      shapes.push({
+        type: "rect",
+        x0: p.start_date,
+        x1: p.end_date,
+        y0: 0,
+        y1: 1,
+        yref: "paper",
+        fillcolor: "rgba(124, 58, 237, 0.10)",
+        line: { width: 1, color: "rgba(124, 58, 237, 0.4)" },
+      });
+    }
+  });
+
+  if (shapes.length) layout.shapes = shapes;
+  if (annotations.length) layout.annotations = annotations;
+
   Plotly.react(chartEl, traces, layout, { responsive: true, displaylogo: false });
 }
 
@@ -732,12 +857,15 @@ async function loadSelectedHistory() {
 
   try {
     const sid = currentSeriesId();
-    const [hist, cal] = await Promise.all([
+    const [hist, cal, promos] = await Promise.all([
       api.getHistory(sid),
       api.getCalibration(sid, state.selectedModel).catch(() => null),
+      api.getPromotions().catch(() => []),
     ]);
     state.history = hist;
     state.calibration = cal;
+    state.promotions = Array.isArray(promos) ? promos : [];
+    renderEventsAndPromos();
   } catch (err) {
     state.history = null;
     state.error = err.message;
@@ -778,13 +906,19 @@ async function handleGenerateForecast() {
   renderStatus();
 
   try {
-    const res = await api.postForecast(currentSeriesId(), state.horizon, state.selectedModel);
+    const res = await api.postForecast(
+      currentSeriesId(),
+      state.horizon,
+      state.selectedModel,
+      state.useCalendarCovariates
+    );
     if (state.animToken !== token) return;
     state.forecast = res;
     if (res && res.calibration) {
       state.calibration = res.calibration;
     }
     state.rangeKey = "6M";
+    renderEventsAndPromos();
   } catch (err) {
     state.forecast = null;
     state.error = err.message;
@@ -2415,6 +2549,14 @@ function setupEvents() {
     state.showMa7 = Boolean(e.target.checked);
     renderChart(false);
   });
+  const calCovToggle = el("toggle-calendar-cov");
+  if (calCovToggle) {
+    calCovToggle.addEventListener("change", (e) => {
+      state.useCalendarCovariates = Boolean(e.target.checked);
+    });
+  }
+  const promoAddBtn = el("promo-add-btn");
+  if (promoAddBtn) promoAddBtn.addEventListener("click", handleAddPromotion);
 
   el("generate-btn").addEventListener("click", handleGenerateForecast);
   el("retry-init-btn").addEventListener("click", () => {
@@ -2426,6 +2568,33 @@ function setupEvents() {
   el("run-eval-btn").addEventListener("click", handleRunEvaluation);
   const calibrateBtn = el("calibrate-btn");
   if (calibrateBtn) calibrateBtn.addEventListener("click", handleRunCalibration);
+
+  const invRefreshBtn = el("inv-refresh-btn");
+  if (invRefreshBtn) invRefreshBtn.addEventListener("click", handleRefreshInventoryForecasts);
+  const invStatusFilter = el("inv-status-filter");
+  if (invStatusFilter) invStatusFilter.addEventListener("change", renderInventoryTable);
+  const invSearchInput = el("inv-search-input");
+  if (invSearchInput) invSearchInput.addEventListener("input", renderInventoryTable);
+  const mcCalcBtn = el("mc-calc-btn");
+  if (mcCalcBtn) mcCalcBtn.addEventListener("click", handleManualCalculate);
+
+  const wiDemand = el("wi-demand-mult");
+  if (wiDemand) {
+    wiDemand.addEventListener("input", () => {
+      if (el("wi-demand-lbl")) el("wi-demand-lbl").textContent = `${Number(wiDemand.value).toFixed(2)}x`;
+    });
+  }
+  const wiLt = el("wi-lt-delta");
+  if (wiLt) {
+    wiLt.addEventListener("input", () => {
+      const v = Number(wiLt.value);
+      if (el("wi-lt-lbl")) el("wi-lt-lbl").textContent = `${v >= 0 ? "+" : ""}${v.toFixed(1)}d`;
+    });
+  }
+  const wiRunBtn = el("wi-run-btn");
+  if (wiRunBtn) wiRunBtn.addEventListener("click", handleRunWhatIf);
+  const autoAddBtn = el("auto-add-btn");
+  if (autoAddBtn) autoAddBtn.addEventListener("click", handleAddSchedule);
   el("download-csv-btn").addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -2561,6 +2730,470 @@ async function loadInitialForecastingData() {
   populateStores();
   state.loadingInitial = false;
   await loadSelectedHistory();
+}
+
+// --- Stage 1: Inventory & Reorder Controller ---
+
+function renderAgreementMatrix(matrix) {
+  const tbody = el("inv-agreement-body");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+  const engines = ["CRITICAL", "LOW", "HEALTHY", "EXCESS"];
+  const labels = ["critical", "low", "medium", "healthy"];
+  engines.forEach((eng) => {
+    const tr = document.createElement("tr");
+    const row = matrix[eng] || {};
+    tr.innerHTML = `
+      <td><span class="inv-badge inv-badge-${eng.toLowerCase()}">${eng}</span></td>
+      ${labels.map((lbl) => `<td class="num">${row[lbl] ?? 0}</td>`).join("")}
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function renderInventoryTable() {
+  const tbody = el("inv-table-body");
+  if (!tbody || !state.inventoryData) return;
+  const statusFilter = el("inv-status-filter")?.value || "ALL";
+  const search = (el("inv-search-input")?.value || "").trim().toLowerCase();
+  const items = state.inventoryData.items || [];
+
+  const filtered = items.filter((item) => {
+    if (statusFilter !== "ALL" && item.status !== statusFilter) return false;
+    if (search && !item.series_id.toLowerCase().includes(search)) return false;
+    return true;
+  });
+
+  tbody.innerHTML = "";
+  filtered.forEach((item) => {
+    const tr = document.createElement("tr");
+    const stClass = `inv-badge-${String(item.status || "").toLowerCase()}`;
+    const ltBadge = item.low_confidence_lt
+      ? `<div><span class="inv-badge inv-badge-warn">Low confidence (&lt;30 orders)</span></div>`
+      : "";
+    const etaText = item.has_forecast
+      ? (item.eta_expected_days != null
+          ? `${item.eta_expected_days.toFixed(1)}d (${item.stockout_date || "-"})`
+          : (item.days_of_cover != null ? `${item.days_of_cover.toFixed(1)}d cover` : "∞"))
+      : "-";
+
+    tr.innerHTML = `
+      <td><strong>${item.material}</strong><br><small style="color:var(--muted)">${item.area}</small></td>
+      <td><span class="inv-badge ${stClass}">${item.status}</span></td>
+      <td>${item.simulated_label}</td>
+      <td class="num"><input class="inv-input-sm" data-field="on_hand" type="number" step="1" value="${item.on_hand}" /></td>
+      <td class="num"><input class="inv-input-sm" data-field="in_transit" type="number" step="1" min="0" value="${item.in_transit}" /></td>
+      <td class="num">${item.L_mean.toFixed(2)} &plusmn; ${item.L_std.toFixed(2)} (${item.order_count})${ltBadge}</td>
+      <td class="num">${item.median_order_qty} u</td>
+      <td class="num">${item.avg_daily_demand != null ? item.avg_daily_demand.toFixed(2) : "-"}</td>
+      <td class="num">${item.safety_stock != null ? item.safety_stock.toFixed(1) : "-"}</td>
+      <td class="num">${item.rop != null ? item.rop.toFixed(1) : "-"}</td>
+      <td class="num">${item.order_up_to_S != null ? item.order_up_to_S.toFixed(1) : "-"}</td>
+      <td class="num"><input class="inv-input-sm" data-field="review_period" type="number" step="1" min="1" value="${item.review_period}" /></td>
+      <td class="num">
+        <input class="inv-input-sm" data-field="pack_size" type="number" step="1" min="1" value="${item.pack_size}" title="Pack Size" />
+        <input class="inv-input-sm" data-field="moq" type="number" step="1" min="0" value="${item.moq}" title="MOQ" style="margin-top:2px" />
+      </td>
+      <td class="num"><strong>${item.order_qty != null ? item.order_qty : "-"}</strong></td>
+      <td class="num">${etaText}</td>
+      <td><button type="button" class="btn-secondary inv-save-btn">Save</button></td>
+    `;
+
+    tr.querySelector(".inv-save-btn").addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      btn.textContent = "Saving...";
+      const readNum = (field, fallback) => {
+        const inp = tr.querySelector(`input[data-field="${field}"]`);
+        const v = Number(inp?.value);
+        return Number.isFinite(v) ? v : fallback;
+      };
+      try {
+        await api.saveInventoryOverride({
+          series_id: item.series_id,
+          dataset_id: state.inventoryData.dataset_id || "retail-demand-m5",
+          on_hand: readNum("on_hand", item.on_hand),
+          in_transit: readNum("in_transit", item.in_transit),
+          review_period: readNum("review_period", item.review_period),
+          pack_size: Math.max(1, Math.round(readNum("pack_size", item.pack_size))),
+          moq: Math.max(0, Math.round(readNum("moq", item.moq))),
+          service_level: item.service_level || 0.95,
+          excess_days_threshold: item.excess_days_threshold || 60,
+        });
+        await loadInventoryView();
+      } catch (err) {
+        state.error = `Failed to save inventory override: ${err.message}`;
+        renderStatus();
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Save";
+      }
+    });
+
+    tbody.appendChild(tr);
+  });
+}
+
+async function loadInventoryView() {
+  try {
+    const data = await api.getInventory();
+    state.inventoryData = data;
+    const sum = data.summary || {};
+    el("inv-sum-total").textContent = sum.total ?? 0;
+    el("inv-sum-critical").textContent = sum.critical ?? 0;
+    el("inv-sum-low").textContent = sum.low ?? 0;
+    el("inv-sum-healthy").textContent = sum.healthy ?? 0;
+    el("inv-sum-excess").textContent = sum.excess ?? 0;
+
+    const noDataBanner = el("inv-no-data-banner");
+    const mainContent = el("inv-main-content");
+    if (!data.has_inventory_data) {
+      if (noDataBanner) noDataBanner.hidden = false;
+      if (el("inv-no-data-msg")) el("inv-no-data-msg").textContent = data.message || "No inventory data for this dataset.";
+      if (mainContent) mainContent.hidden = true;
+      return;
+    }
+
+    if (noDataBanner) noDataBanner.hidden = true;
+    if (mainContent) mainContent.hidden = false;
+    renderAgreementMatrix(data.agreement_matrix || {});
+    renderInventoryTable();
+
+    const wiSelect = el("wi-series-select");
+    if (wiSelect && Array.isArray(data.items) && wiSelect.options.length === 0) {
+      data.items.forEach((it) => {
+        wiSelect.appendChild(new Option(it.series_id, it.series_id));
+      });
+    }
+    loadAutomationSchedules();
+  } catch (err) {
+    state.error = `Inventory load failed: ${err.message}`;
+    renderStatus();
+  }
+}
+
+async function handleRefreshInventoryForecasts() {
+  const btn = el("inv-refresh-btn");
+  const wrap = el("inv-progress-wrap");
+  const fill = el("inv-progress-fill");
+  const label = el("inv-progress-label");
+  if (btn) btn.disabled = true;
+  if (wrap) wrap.hidden = false;
+  if (fill) fill.style.width = "2%";
+  if (label) label.textContent = "Starting batch Chronos-2 forecasts for 75 series...";
+
+  try {
+    const start = await api.refreshInventoryForecasts("retail-demand-m5", 28);
+    const jobId = start.job_id;
+    while (true) {
+      await new Promise((r) => setTimeout(r, 900));
+      const st = await api.getInventoryRefreshStatus(jobId);
+      const total = Math.max(1, st.total_series || 75);
+      const done = st.completed_series || 0;
+      const pct = Math.min(100, Math.round((done / total) * 100));
+      if (fill) fill.style.width = `${pct}%`;
+      if (label) {
+        label.textContent = st.status === "completed"
+          ? `Completed ${done}/${total} series in ${st.duration_sec}s (logged in Forecasting History).`
+          : `Forecasting ${done}/${total}: ${st.current_series || "..."}`;
+      }
+      if (st.status === "completed") {
+        await loadInventoryView();
+        break;
+      }
+      if (st.status === "failed") {
+        state.error = `Batch forecast failed: ${st.error_message || "Unknown error"}`;
+        renderStatus();
+        break;
+      }
+    }
+  } catch (err) {
+    state.error = `Batch refresh failed: ${err.message}`;
+    renderStatus();
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function handleManualCalculate() {
+  const num = (id, fb) => {
+    const v = Number(el(id)?.value);
+    return Number.isFinite(v) ? v : fb;
+  };
+  const out = el("mc-result");
+  try {
+    const res = await api.calculateManualInventory({
+      on_hand: num("mc-on-hand", 0),
+      in_transit: num("mc-in-transit", 0),
+      daily_demand_mean: num("mc-demand-mean", 10),
+      daily_demand_std: num("mc-demand-std", 3),
+      lead_time_mean: num("mc-lt-mean", 4),
+      lead_time_std: num("mc-lt-std", 1),
+      review_period: num("mc-r", 7),
+      service_level: num("mc-svc", 0.95),
+      pack_size: Math.max(1, Math.round(num("mc-pack", 1))),
+      moq: Math.max(0, Math.round(num("mc-moq", 0))),
+    });
+    if (out) {
+      out.hidden = false;
+      out.innerHTML = `
+        <span><strong>Status:</strong> <span class="inv-badge inv-badge-${res.status.toLowerCase()}">${res.status}</span></span>
+        <span><strong>Safety Stock:</strong> ${res.safety_stock.toFixed(1)} u</span>
+        <span><strong>ROP:</strong> ${res.rop.toFixed(1)} u</span>
+        <span><strong>Order-up-to S:</strong> ${res.order_up_to_S.toFixed(1)} u</span>
+        <span><strong>Order Qty:</strong> <strong>${res.order_qty} u</strong></span>
+        <span><strong>Runway ETA:</strong> ${res.eta_expected_days != null ? `${res.eta_expected_days.toFixed(1)}d` : "∞"}</span>
+      `;
+    }
+  } catch (err) {
+    state.error = `Manual calculator error: ${err.message}`;
+    renderStatus();
+  }
+}
+
+// --- Stage 2: Calendar Events & Promotions Controller ---
+
+function renderEventsAndPromos() {
+  const listEl = el("events-horizon-list");
+  const badgeEl = el("events-horizon-badge");
+  const promoListEl = el("promo-list");
+
+  if (listEl && badgeEl) {
+    const evData = state.forecast?.events_in_horizon;
+    const cal = evData?.calendar_events || [];
+    const prs = evData?.promotions || [];
+    const total = cal.length + prs.length;
+    badgeEl.textContent = `${total} in horizon`;
+    if (!state.forecast) {
+      listEl.textContent = "Generate a forecast to inspect events in the forecast window.";
+    } else if (total === 0) {
+      listEl.textContent = "No calendar events or promotions fall inside this forecast horizon.";
+    } else {
+      listEl.innerHTML = [
+        ...cal.map((e) => `<span class="pill">${e.date}: ${e.label}</span>`),
+        ...prs.map((p) => `<span class="pill pill-demo">Promo: ${p.name} (${p.start_date} to ${p.end_date}, ${p.uplift_pct >= 0 ? "+" : ""}${p.uplift_pct}% assumed)</span>`),
+      ].join("");
+    }
+  }
+
+  if (promoListEl) {
+    const promos = state.promotions || [];
+    if (promos.length === 0) {
+      promoListEl.innerHTML = `<span style="color:var(--muted)">No saved promotions yet.</span>`;
+    } else {
+      promoListEl.innerHTML = promos
+        .map(
+          (p) => `
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);">
+            <span>
+              <strong>${p.name}</strong> (${p.series_id || "All series"}) &mdash; ${p.start_date} to ${p.end_date}
+              &bull; Assumed uplift: <strong>${p.uplift_pct >= 0 ? "+" : ""}${p.uplift_pct}%</strong>
+            </span>
+            <button type="button" class="btn-danger-outline promo-del-btn" data-promo-id="${p.id}">Delete</button>
+          </div>`
+        )
+        .join("");
+
+      promoListEl.querySelectorAll(".promo-del-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          try {
+            await api.deletePromotion(btn.dataset.promoId);
+            state.promotions = await api.getPromotions();
+            renderEventsAndPromos();
+            renderChart(false);
+          } catch (err) {
+            state.error = `Delete promotion failed: ${err.message}`;
+            renderStatus();
+          }
+        });
+      });
+    }
+  }
+}
+
+async function loadAutomationSchedules() {
+  const listEl = el("auto-schedules-list");
+  if (!listEl) return;
+  try {
+    const data = await api.getAutomationSchedules();
+    const schedules = data.schedules || [];
+    const logs = data.logs || [];
+    const apNote = data.apscheduler_available
+      ? ""
+      : `<div style="margin-bottom:8px;color:#9A3F0E;">Note: APScheduler not installed; schedules can still be saved and triggered manually via Run Now.</div>`;
+    if (schedules.length === 0) {
+      listEl.innerHTML = `${apNote}<span style="color:var(--muted)">No scheduled jobs yet.</span>`;
+      return;
+    }
+    listEl.innerHTML = `${apNote}` + schedules
+      .map(
+        (s) => `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);">
+          <span>
+            <strong>${s.name}</strong> &bull; <code>${s.job_type}</code> &bull; cron <code>${s.cron_expr}</code>
+            ${s.last_run_at ? `&bull; Last: ${s.last_status} (${s.last_run_at})` : ""}
+          </span>
+          <span style="display:inline-flex;gap:6px;">
+            <button type="button" class="btn-secondary auto-run-btn" data-id="${s.id}">Run Now</button>
+            <button type="button" class="btn-danger-outline auto-del-btn" data-id="${s.id}">Delete</button>
+          </span>
+        </div>`
+      )
+      .join("") + (logs.length ? `<div style="margin-top:8px;color:var(--muted);">Latest log: ${logs[0].created_at} &mdash; ${logs[0].message}</div>` : "");
+
+    listEl.querySelectorAll(".auto-run-btn").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        try {
+          await api.runAutomationSchedule(btn.dataset.id);
+          await loadAutomationSchedules();
+        } catch (err) {
+          state.error = `Run schedule failed: ${err.message}`;
+          renderStatus();
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
+
+    listEl.querySelectorAll(".auto-del-btn").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        try {
+          await api.deleteAutomationSchedule(btn.dataset.id);
+          await loadAutomationSchedules();
+        } catch (err) {
+          state.error = `Delete schedule failed: ${err.message}`;
+          renderStatus();
+        }
+      });
+    });
+  } catch (err) {
+    listEl.innerHTML = `<span style="color:var(--error)">Could not load schedules: ${err.message}</span>`;
+  }
+}
+
+async function handleAddSchedule() {
+  const name = (el("auto-name")?.value || "").trim();
+  const jobType = el("auto-job-type")?.value || "batch_forecast_refresh";
+  const cronExpr = (el("auto-cron")?.value || "0 6 * * *").trim();
+  if (!name) {
+    state.error = "Schedule name is required.";
+    renderStatus();
+    return;
+  }
+  state.error = "";
+  try {
+    await api.createAutomationSchedule({ name, job_type: jobType, cron_expr: cronExpr });
+    if (el("auto-name")) el("auto-name").value = "";
+    await loadAutomationSchedules();
+  } catch (err) {
+    state.error = `Failed to create schedule: ${err.message}`;
+    renderStatus();
+  }
+}
+
+async function handleRunWhatIf() {
+  const sid = el("wi-series-select")?.value;
+  if (!sid) return;
+  const out = el("wi-result");
+  const chartEl = el("wi-chart");
+  const onHandRaw = el("wi-on-hand")?.value;
+  const payload = {
+    series_id: sid,
+    demand_multiplier: Number(el("wi-demand-mult")?.value || 1.0),
+    lead_time_delta_days: Number(el("wi-lt-delta")?.value || 0.0),
+    service_level: Number(el("wi-svc")?.value || 0.95),
+    review_period: Number(el("wi-r")?.value || 7),
+    on_hand_override: onHandRaw !== "" && onHandRaw != null ? Number(onHandRaw) : null,
+  };
+
+  state.error = "";
+  try {
+    const res = await api.runWhatIf(payload);
+    const b = res.baseline;
+    const s = res.scenario;
+    const d = res.delta;
+    const fmtDelta = (v, unit = "u") => (v == null ? "-" : `${v >= 0 ? "+" : ""}${v}${unit}`);
+    if (out) {
+      out.hidden = false;
+      out.innerHTML = `
+        <span><strong>Baseline Status:</strong> <span class="inv-badge inv-badge-${b.status.toLowerCase()}">${b.status}</span> &rarr; <strong>Scenario:</strong> <span class="inv-badge inv-badge-${s.status.toLowerCase()}">${s.status}</span></span>
+        <span><strong>Safety Stock:</strong> ${b.safety_stock} &rarr; <strong>${s.safety_stock}</strong> (${fmtDelta(d.safety_stock)})</span>
+        <span><strong>ROP:</strong> ${b.rop} &rarr; <strong>${s.rop}</strong> (${fmtDelta(d.rop)})</span>
+        <span><strong>Order-up-to S:</strong> ${b.order_up_to_S} &rarr; <strong>${s.order_up_to_S}</strong> (${fmtDelta(d.order_up_to_S)})</span>
+        <span><strong>Order Qty:</strong> ${b.order_qty} &rarr; <strong>${s.order_qty}</strong> (${fmtDelta(d.order_qty)})</span>
+        <span><strong>Runway ETA:</strong> ${b.eta_expected_days ?? "∞"}d &rarr; <strong>${s.eta_expected_days ?? "∞"}d</strong> (${fmtDelta(d.eta_expected_days, "d")})</span>
+      `;
+    }
+    if (chartEl && typeof Plotly !== "undefined") {
+      chartEl.hidden = false;
+      Plotly.react(
+        chartEl,
+        [
+          {
+            x: res.dates,
+            y: res.baseline_daily_expected,
+            type: "scatter",
+            mode: "lines",
+            name: "Baseline Expected",
+            line: { color: "#1F4E79", width: 2 },
+          },
+          {
+            x: res.dates,
+            y: res.scenario_daily_expected,
+            type: "scatter",
+            mode: "lines",
+            name: `Scenario (${payload.demand_multiplier.toFixed(2)}x)`,
+            line: { color: "#C2571A", width: 2.2, dash: "dash" },
+          },
+        ],
+        {
+          margin: { l: 45, r: 20, t: 25, b: 35 },
+          paper_bgcolor: "transparent",
+          plot_bgcolor: "transparent",
+          title: { text: `${sid} — Baseline vs. Scenario Daily Demand`, font: { size: 13 } },
+          yaxis: { title: "Units / day" },
+        },
+        { responsive: true, displaylogo: false }
+      );
+    }
+  } catch (err) {
+    state.error = `What-If failed: ${err.message}`;
+    renderStatus();
+  }
+}
+
+async function handleAddPromotion() {
+  const name = (el("promo-name")?.value || "").trim();
+  const start = el("promo-start")?.value || "";
+  const end = el("promo-end")?.value || "";
+  const scope = el("promo-scope")?.value || "CURRENT";
+  const uplift = Number(el("promo-uplift")?.value || 0);
+  const notes = (el("promo-notes")?.value || "").trim();
+
+  if (!name || !start || !end) {
+    state.error = "Promotion name, start date, and end date are required.";
+    renderStatus();
+    return;
+  }
+  state.error = "";
+  try {
+    await api.createPromotion({
+      name,
+      start_date: start,
+      end_date: end,
+      series_id: scope === "ALL" ? null : currentSeriesId(),
+      uplift_pct: Number.isFinite(uplift) ? uplift : 0,
+      notes,
+    });
+    state.promotions = await api.getPromotions();
+    if (el("promo-name")) el("promo-name").value = "";
+    renderEventsAndPromos();
+    renderChart(false);
+  } catch (err) {
+    state.error = `Failed to add promotion: ${err.message}`;
+    renderStatus();
+  }
 }
 
 async function init() {

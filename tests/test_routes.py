@@ -47,29 +47,32 @@ def test_all_frontend_api_routes_exist_in_openapi():
 
 
 @pytest.mark.slow
-def test_all_tabs_endpoints_smoke():
-    with TestClient(app) as client:
-        # Overview & Health
-        assert client.get("/api/health").status_code == 200
-        assert client.get("/api/overview").status_code == 200
+def test_all_tabs_endpoints_smoke(client: TestClient):
+    import time
 
-        # Forecasting
-        s_resp = client.get("/api/series")
-        assert s_resp.status_code == 200
-        sid = s_resp.json()[0]
-        assert client.get("/api/history", params={"series_id": sid}).status_code == 200
-        fc_resp = client.post("/api/forecast", json={"series_id": sid, "horizon": 28, "model_type": "chronos"})
-        assert fc_resp.status_code == 200
-        run_id = fc_resp.json()["run_id"]
+    t0 = time.perf_counter()
+    # Overview & Health
+    assert client.get("/api/health").status_code == 200
+    assert client.get("/api/overview").status_code == 200
 
-        # Model Training & Datasets
-        assert client.get("/api/datasets").status_code == 200
-        assert client.get("/api/models").status_code == 200
+    # Forecasting
+    s_resp = client.get("/api/series")
+    assert s_resp.status_code == 200
+    sid = s_resp.json()[0]
+    assert client.get("/api/history", params={"series_id": sid}).status_code == 200
+    fc_resp = client.post("/api/forecast", json={"series_id": sid, "horizon": 28, "model_type": "chronos"})
+    assert fc_resp.status_code == 200
+    run_id = fc_resp.json()["run_id"]
 
-        # Model Comparison
-        assert client.post("/api/compare", json={"series_id": sid, "horizon": 14, "cutoff_index": 100}).status_code == 200
+    # Model Training & Datasets
+    assert client.get("/api/datasets").status_code == 200
+    assert client.get("/api/models").status_code == 200
 
-        # Forecasting History
-        assert client.get("/api/history/runs", params={"paginated": True}).status_code == 200
-        assert client.get(f"/api/history/runs/{run_id}").status_code == 200
-        assert client.delete(f"/api/history/runs/{run_id}").status_code == 200
+    # Model Comparison
+    assert client.post("/api/compare", json={"series_id": sid, "horizon": 14, "cutoff_index": 100}).status_code == 200
+
+    # Forecasting History
+    assert client.get("/api/history/runs", params={"paginated": True}).status_code == 200
+    assert client.get(f"/api/history/runs/{run_id}").status_code == 200
+    assert client.delete(f"/api/history/runs/{run_id}").status_code == 200
+    print(f"[slow] Stage All-Tabs API Smoke (Chronos-2 + Compare) took {time.perf_counter() - t0:.2f}s")

@@ -3,18 +3,12 @@ from __future__ import annotations
 
 import json
 import math
+import time
 
 import pytest
 from fastapi.testclient import TestClient
 
 from rdf.config import MODEL_ID
-from server.main import app
-
-
-@pytest.fixture(scope="session")
-def client():
-    with TestClient(app) as c:
-        yield c
 
 
 def test_history_list_filter_sort_pagination(client: TestClient):
@@ -82,6 +76,7 @@ def test_history_detail_delete_and_404(client: TestClient):
 
 @pytest.mark.slow
 def test_chronos2_run_inspect_and_rerun(client: TestClient):
+    t0 = time.perf_counter()
     sid = "FOODS_3_080 | Texas - TX_1"
     created = client.post("/api/forecast", json={"series_id": sid, "horizon": 28, "model_type": "chronos"})
     assert created.status_code == 200
@@ -127,3 +122,4 @@ def test_chronos2_run_inspect_and_rerun(client: TestClient):
         client.delete(f"/api/history/runs/{orig_id}")
         if rerun_id:
             client.delete(f"/api/history/runs/{rerun_id}")
+        print(f"[slow] Stage History Inspect & Re-run (Chronos-2) took {time.perf_counter() - t0:.2f}s")

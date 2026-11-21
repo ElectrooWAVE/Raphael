@@ -40,7 +40,14 @@ def load_pipeline(model_id: str = MODEL_ID):
     return pipeline, device
 
 
-def forecast(pipeline, history: pd.DataFrame, horizon: int, series_id: str = "item") -> pd.DataFrame:
+def forecast(
+    pipeline,
+    history: pd.DataFrame,
+    horizon: int,
+    series_id: str = "item",
+    history_covariates: pd.DataFrame | None = None,
+    future_covariates: pd.DataFrame | None = None,
+) -> pd.DataFrame:
     """history: [date, sales] daily. Returns [date, median, expected, q10, q50, q90].
 
     Values are real Chronos-2 outputs clipped at 0 (retail demand cannot be negative).
@@ -53,17 +60,26 @@ def forecast(pipeline, history: pd.DataFrame, horizon: int, series_id: str = "it
     if len(ctx) < 30:
         raise ForecastError("Need at least 30 days of history to forecast.")
 
-    df = pd.DataFrame({"item_id": series_id, "timestamp": history["date"], "target": history["sales"]})
+    df = pd.DataFrame({"item_id": series_id, "timestamp": pd.to_datetime(history["date"]), "target": history["sales"]})
+    predict_kwargs: dict[str, object] = {
+        "id_column": "item_id",
+        "timestamp_column": "timestamp",
+        "target": "target",
+        "prediction_length": horizon,
+        "quantile_levels": DENSE_QUANTILES,
+        "freq": "D",
+    }
+    if history_covariates is not None and future_covariates is not None and len(future_covariates) == horizon:
+        cov_cols = [c for c in history_covariates.columns if c != "timestamp"]
+        for c in cov_cols:
+            df[c] = history_covariates[c].to_numpy()
+        fut_df = pd.DataFrame({"item_id": series_id, "timestamp": pd.to_datetime(future_covariates["timestamp"])})
+        for c in cov_cols:
+            fut_df[c] = future_covariates[c].to_numpy()
+        predict_kwargs["future_df"] = fut_df
+
     try:
-        out = pipeline.predict_df(
-            df,
-            id_column="item_id",
-            timestamp_column="timestamp",
-            target="target",
-            prediction_length=horizon,
-            quantile_levels=DENSE_QUANTILES,
-            freq="D",
-        )
+        out = pipeline.predict_df(df, **predict_kwargs)
     except Exception as e:
         raise ForecastError(f"Chronos-2 inference failed: {e}") from e
 

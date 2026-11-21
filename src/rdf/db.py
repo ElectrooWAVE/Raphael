@@ -174,8 +174,72 @@ def init_db(db_path: Path = DB_PATH) -> None:
             bias REAL,
             sample_points INTEGER,
             val_window_end TEXT,
+            val_errors_json TEXT,
             updated_at TEXT NOT NULL,
             PRIMARY KEY (series_id, model_type, dataset_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS inventory_overrides (
+            series_id TEXT NOT NULL,
+            dataset_id TEXT NOT NULL DEFAULT 'retail-demand-m5',
+            on_hand REAL,
+            in_transit REAL NOT NULL DEFAULT 0.0,
+            review_period REAL NOT NULL DEFAULT 7.0,
+            pack_size INTEGER NOT NULL DEFAULT 1,
+            moq INTEGER NOT NULL DEFAULT 0,
+            service_level REAL NOT NULL DEFAULT 0.95,
+            excess_days_threshold REAL NOT NULL DEFAULT 60.0,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (series_id, dataset_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS inventory_batch_jobs (
+            id TEXT PRIMARY KEY,
+            dataset_id TEXT NOT NULL,
+            model_type TEXT NOT NULL,
+            model_id TEXT,
+            horizon INTEGER NOT NULL DEFAULT 28,
+            status TEXT NOT NULL,
+            total_series INTEGER NOT NULL,
+            completed_series INTEGER NOT NULL DEFAULT 0,
+            current_series TEXT,
+            duration_sec REAL,
+            error_message TEXT,
+            created_at TEXT NOT NULL,
+            completed_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS promotions (
+            id TEXT PRIMARY KEY,
+            dataset_id TEXT NOT NULL DEFAULT 'retail-demand-m5',
+            series_id TEXT,
+            name TEXT NOT NULL,
+            start_date TEXT NOT NULL,
+            end_date TEXT NOT NULL,
+            promo_type TEXT NOT NULL DEFAULT 'promotion',
+            uplift_pct REAL NOT NULL DEFAULT 0.0,
+            notes TEXT,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS automation_schedules (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            job_type TEXT NOT NULL,
+            cron_expr TEXT NOT NULL,
+            dataset_id TEXT NOT NULL DEFAULT 'retail-demand-m5',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            last_run_at TEXT,
+            last_status TEXT,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS automation_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            schedule_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            message TEXT,
+            created_at TEXT NOT NULL
         );
         """)
 
@@ -187,3 +251,10 @@ def init_db(db_path: Path = DB_PATH) -> None:
             conn.execute("ALTER TABLE forecast_runs ADD COLUMN device TEXT")
         if "reproducibility_json" not in existing_cols:
             conn.execute("ALTER TABLE forecast_runs ADD COLUMN reproducibility_json TEXT")
+
+        cal_cols = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(series_calibration)").fetchall()
+        }
+        if "val_errors_json" not in cal_cols:
+            conn.execute("ALTER TABLE series_calibration ADD COLUMN val_errors_json TEXT")

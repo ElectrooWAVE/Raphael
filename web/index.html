@@ -144,6 +144,10 @@
 
             <div class="chart-controls-right">
               <label class="toggle-inline">
+                <input type="checkbox" id="toggle-calendar-cov">
+                <span>Calendar &amp; Promo Covariates</span>
+              </label>
+              <label class="toggle-inline">
                 <input type="checkbox" id="toggle-ma7">
                 <span>7-day average</span>
               </label>
@@ -162,6 +166,41 @@
             <div id="chart" class="chart-container"></div>
           </div>
         </section>
+
+        <!-- Calendar Events & Promotions (Stage 2) -->
+        <details id="events-promo-section" class="panel details-panel">
+          <summary class="details-summary">
+            <span>Calendar Events &amp; Promotions</span>
+            <span id="events-horizon-badge" class="pill">0 in horizon</span>
+          </summary>
+          <div class="eval-content-wrap">
+            <div style="margin-bottom:12px;">
+              <h3 class="section-label" style="margin-bottom:6px;">Events &amp; Promotions in Forecast Horizon</h3>
+              <div id="events-horizon-list" style="display:flex;flex-wrap:wrap;gap:8px;font-size:13px;color:var(--muted);">
+                Generate a forecast to inspect events in the forecast window.
+              </div>
+            </div>
+            <hr style="border:0;border-top:1px solid var(--border);margin:12px 0;" />
+            <h3 class="section-label" style="margin-bottom:6px;">Manage Promotions (User Assumptions)</h3>
+            <div class="inv-calc-grid">
+              <label><span>Promotion Name</span><input id="promo-name" type="text" placeholder="e.g. Spring Weekend Promo" /></label>
+              <label><span>Scope</span>
+                <select id="promo-scope">
+                  <option value="CURRENT">Current Product-Store</option>
+                  <option value="ALL">All Series</option>
+                </select>
+              </label>
+              <label><span>Start Date</span><input id="promo-start" type="date" value="2016-04-28" /></label>
+              <label><span>End Date</span><input id="promo-end" type="date" value="2016-05-02" /></label>
+              <label><span>Assumed Uplift (%)</span><input id="promo-uplift" type="number" step="1" value="15" /></label>
+              <label><span>Notes</span><input id="promo-notes" type="text" placeholder="Optional note" /></label>
+            </div>
+            <div style="margin-top:10px;">
+              <button id="promo-add-btn" type="button" class="btn-secondary">Add Promotion</button>
+            </div>
+            <div id="promo-list" style="margin-top:12px;font-size:13px;"></div>
+          </div>
+        </details>
 
         <!-- Model Evaluation Section on this Page -->
         <details id="eval-section" class="panel details-panel" open>
@@ -267,11 +306,183 @@
         </section>
       </section>
 
-      <!-- ================= INVENTORY & REORDER (STAGE 1 PLACEHOLDER) ================= -->
+      <!-- ================= INVENTORY & REORDER (STAGE 1) ================= -->
       <section id="view-inventory" class="view-panel">
-        <div class="panel">
-          <h2 class="section-label">Inventory &amp; Reorder</h2>
-          <p class="panel-subtitle">Stage 1: Replenishment recommendations using calibrated forecasts and lead-time uncertainty (coming next).</p>
+        <div class="panel inv-header-panel">
+          <div class="inv-header-top">
+            <div>
+              <div class="inv-title-row">
+                <h2 class="section-label">Inventory &amp; Reorder</h2>
+                <span class="pill pill-demo">Simulated inventory (demo data)</span>
+              </div>
+              <p class="panel-subtitle">
+                Units only (no currency/cost columns in source CSVs). Snapshot: <strong>2016-04-24</strong>; runway walk starts on first forecast day <strong>2016-04-25</strong>.
+              </p>
+            </div>
+            <div class="inv-header-actions" style="display:flex;gap:8px;flex-wrap:wrap;">
+              <a id="inv-export-xlsx-btn" class="btn-secondary" href="/api/reports/inventory.xlsx" download>Export Excel (.xlsx)</a>
+              <a id="inv-export-pdf-btn" class="btn-secondary" href="/api/reports/inventory.pdf" download>Export PDF</a>
+              <button id="inv-refresh-btn" type="button" class="btn-primary">Refresh forecasts (75 series)</button>
+            </div>
+          </div>
+
+          <div id="inv-progress-wrap" class="inv-progress-wrap" hidden>
+            <div class="inv-progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="75" aria-valuenow="0">
+              <div id="inv-progress-fill" class="inv-progress-fill" style="width:0%"></div>
+            </div>
+            <span id="inv-progress-label" class="inv-progress-label">Starting batch Chronos-2 forecasts...</span>
+          </div>
+
+          <div class="inv-rules-box">
+            <strong>Status Rules (evaluated in order):</strong>
+            <span><strong>1. CRITICAL:</strong> Expected-demand runway &lt; L_mean OR conservative (q90) runway &le; L_mean.</span>
+            <span><strong>2. LOW:</strong> Inventory position (on-hand + in-transit) &le; ROP.</span>
+            <span><strong>3. EXCESS:</strong> Days of cover &gt; max(excess threshold [default 60d], 3 &times; S).</span>
+            <span><strong>4. HEALTHY:</strong> Otherwise.</span>
+          </div>
+
+          <div id="inv-summary-grid" class="inv-summary-grid">
+            <div class="inv-kpi"><span class="inv-kpi-lbl">Total SKUs</span><strong id="inv-sum-total">-</strong></div>
+            <div class="inv-kpi inv-kpi-critical"><span class="inv-kpi-lbl">CRITICAL</span><strong id="inv-sum-critical">-</strong></div>
+            <div class="inv-kpi inv-kpi-low"><span class="inv-kpi-lbl">LOW</span><strong id="inv-sum-low">-</strong></div>
+            <div class="inv-kpi inv-kpi-healthy"><span class="inv-kpi-lbl">HEALTHY</span><strong id="inv-sum-healthy">-</strong></div>
+            <div class="inv-kpi inv-kpi-excess"><span class="inv-kpi-lbl">EXCESS</span><strong id="inv-sum-excess">-</strong></div>
+          </div>
+        </div>
+
+        <div id="inv-no-data-banner" class="panel" hidden>
+          <p id="inv-no-data-msg" class="panel-subtitle">No inventory data for this dataset. Use the Manual calculator below.</p>
+        </div>
+
+        <div id="inv-main-content">
+          <div class="panel inv-agreement-panel">
+            <h3 class="section-label">Engine Status vs. Simulated Label (File) Agreement</h3>
+            <div class="table-wrap">
+              <table class="data-table inv-agreement-table">
+                <thead>
+                  <tr>
+                    <th>Engine \ File Label</th>
+                    <th class="num">critical</th>
+                    <th class="num">low</th>
+                    <th class="num">medium</th>
+                    <th class="num">healthy</th>
+                  </tr>
+                </thead>
+                <tbody id="inv-agreement-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="inv-toolbar">
+              <label class="field-inline">
+                <span>Filter Status</span>
+                <select id="inv-status-filter">
+                  <option value="ALL">All</option>
+                  <option value="CRITICAL">CRITICAL</option>
+                  <option value="LOW">LOW</option>
+                  <option value="HEALTHY">HEALTHY</option>
+                  <option value="EXCESS">EXCESS</option>
+                  <option value="NEEDS_FORECAST">NEEDS_FORECAST</option>
+                </select>
+              </label>
+              <label class="field-inline">
+                <span>Search Series</span>
+                <input id="inv-search-input" type="search" placeholder="e.g. FOODS_2_019 or CA_1" />
+              </label>
+            </div>
+
+            <div class="table-wrap inv-table-wrap">
+              <table class="data-table inv-table">
+                <thead>
+                  <tr>
+                    <th>Product | Store</th>
+                    <th>Status</th>
+                    <th>Simulated label (file)</th>
+                    <th class="num">On-Hand (u)</th>
+                    <th class="num">In-Transit (u)</th>
+                    <th class="num">L mean &plusmn; std (orders)</th>
+                    <th class="num">Typical Order Qty (info)</th>
+                    <th class="num">Daily Demand (u/d)</th>
+                    <th class="num">Safety Stock (u)</th>
+                    <th class="num">ROP (u)</th>
+                    <th class="num">Order-up-to S (u)</th>
+                    <th class="num">R (d)</th>
+                    <th class="num">Pack / MOQ</th>
+                    <th class="num">Order Qty (u)</th>
+                    <th class="num">Runway / ETA</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="inv-table-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div id="inv-manual-panel" class="panel">
+          <h3 class="section-label">Manual Reorder Calculator (Single Series)</h3>
+          <p class="panel-subtitle">Works for any dataset or custom scenario (units only).</p>
+          <div class="inv-calc-grid">
+            <label><span>On-Hand (units)</span><input id="mc-on-hand" type="number" step="1" value="35" /></label>
+            <label><span>In-Transit (units)</span><input id="mc-in-transit" type="number" step="1" value="40" /></label>
+            <label><span>Daily Demand Mean</span><input id="mc-demand-mean" type="number" step="0.1" value="10" /></label>
+            <label><span>Forecast Error Std (1d)</span><input id="mc-demand-std" type="number" step="0.1" value="3" /></label>
+            <label><span>Lead Time Mean (days)</span><input id="mc-lt-mean" type="number" step="0.1" value="4" /></label>
+            <label><span>Lead Time Std (days)</span><input id="mc-lt-std" type="number" step="0.1" value="1" /></label>
+            <label><span>Review Period R (days)</span><input id="mc-r" type="number" step="1" value="7" /></label>
+            <label><span>Service Level</span><input id="mc-svc" type="number" step="0.01" min="0.5" max="0.999" value="0.95" /></label>
+            <label><span>Pack Size</span><input id="mc-pack" type="number" step="1" min="1" value="12" /></label>
+            <label><span>Min Order Qty (MOQ)</span><input id="mc-moq" type="number" step="1" min="0" value="0" /></label>
+          </div>
+          <div style="margin-top:12px;">
+            <button id="mc-calc-btn" type="button" class="btn-secondary">Calculate Reorder</button>
+          </div>
+          <div id="mc-result" class="inv-calc-result" hidden></div>
+        </div>
+
+        <div id="inv-whatif-panel" class="panel">
+          <h3 class="section-label">What-If Scenario Sandbox</h3>
+          <p class="panel-subtitle">Stress-test demand shocks, supplier lead-time delays, and service-level targets against stored baseline forecasts (user-supplied assumptions).</p>
+          <div class="inv-calc-grid">
+            <label><span>Product | Store</span><select id="wi-series-select"></select></label>
+            <label><span>Demand Shock (<strong id="wi-demand-lbl">1.00x</strong>)</span><input id="wi-demand-mult" type="range" min="0.5" max="2.0" step="0.05" value="1.0" /></label>
+            <label><span>Lead-Time Shift (<strong id="wi-lt-lbl">+0.0d</strong>)</span><input id="wi-lt-delta" type="range" min="-3" max="10" step="0.5" value="0" /></label>
+            <label><span>Service Level</span>
+              <select id="wi-svc">
+                <option value="0.90">90% (z = 1.28)</option>
+                <option value="0.95" selected>95% (z = 1.65)</option>
+                <option value="0.98">98% (z = 2.05)</option>
+                <option value="0.99">99% (z = 2.33)</option>
+              </select>
+            </label>
+            <label><span>Review Period R (days)</span><input id="wi-r" type="number" step="1" min="1" value="7" /></label>
+            <label><span>On-Hand Override (optional)</span><input id="wi-on-hand" type="number" step="1" placeholder="Use baseline" /></label>
+          </div>
+          <div style="margin-top:12px;">
+            <button id="wi-run-btn" type="button" class="btn-primary">Run What-If Scenario</button>
+          </div>
+          <div id="wi-result" class="inv-calc-result" hidden></div>
+          <div id="wi-chart" style="height:260px;margin-top:12px;" hidden></div>
+        </div>
+
+        <div id="inv-automation-panel" class="panel">
+          <h3 class="section-label">Automation &amp; Scheduled Jobs</h3>
+          <p class="panel-subtitle">Schedule recurring Chronos-2 batch refreshes or Excel replenishment snapshots (APScheduler cron).</p>
+          <div class="inv-calc-grid">
+            <label><span>Schedule Name</span><input id="auto-name" type="text" placeholder="e.g. Daily Morning Refresh" /></label>
+            <label><span>Job Type</span>
+              <select id="auto-job-type">
+                <option value="batch_forecast_refresh">Batch Chronos-2 Refresh (75 series)</option>
+                <option value="export_report">Save Excel Replenishment Snapshot</option>
+              </select>
+            </label>
+            <label><span>Cron Expression (5-field)</span><input id="auto-cron" type="text" value="0 6 * * *" /></label>
+          </div>
+          <div style="margin-top:10px;">
+            <button id="auto-add-btn" type="button" class="btn-secondary">Add Schedule</button>
+          </div>
+          <div id="auto-schedules-list" style="margin-top:12px;font-size:13px;"></div>
         </div>
       </section>
 

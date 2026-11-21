@@ -1,14 +1,5 @@
 """Integration tests for expanded Platform API endpoints."""
-import pytest
 from fastapi.testclient import TestClient
-
-from server.main import app
-
-
-@pytest.fixture(scope="session")
-def client():
-    with TestClient(app) as c:
-        yield c
 
 
 def test_api_overview(client: TestClient):
